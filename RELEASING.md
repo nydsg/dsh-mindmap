@@ -1,40 +1,52 @@
 # 发布指南（你要在终端里执行的命令）
 
-仓库内容已经整理成可直接开源的状态。剩下三步——**建仓库、推送、发包**——必须由你本人执行：本机没有 git，也没有你的 GitHub / npm 凭据，我不应该也不能代持。
+**仓库已经上线了。** `https://github.com/nydsg/dsh-mindmap` 上现在有 32 个文件、两个提交，CI 双版本（Node 20 / 22）全绿，README 顶部的 test 徽章显示 `passing`。
+
+```text
+70e98eb  feat: DSH conversation mind map plugin (v1.1.0)   <- nydsg <274722888+nydsg@users.noreply.github.com>
+1ae7b8a  Initial commit                                    <- 你建库时勾 README 产生的
+```
+
+剩下的是 **npm 发布**与**市场收录**，那两步必须由你本人执行：需要你的 npm 凭据，我不应该也不能代持。
 
 | 项 | 值 |
 |---|---|
 | 包名 | `@nydsg/dsh-mindmap` |
 | 仓库 | `https://github.com/nydsg/dsh-mindmap` |
 | 版本 | `1.1.0` |
-| 提交身份 | `nydsg <274722888+nydsg@users.noreply.github.com>`（已核对：GitHub 账号 `nydsg` 的 id 是 274722888） |
+| 提交身份 | `nydsg <274722888+nydsg@users.noreply.github.com>`（仓库级配置，**没有动你的全局 `.gitconfig`**） |
 
 > **为什么用 scope**：`dsh-mindmap` 这个裸名在 npm 上已被占用（不是本项目）。`@nydsg/dsh-mindmap` 已确认可用，且生态惯例如此（你已装的 `@furongjun1999/dsh-memory`、`@liustack/modlens` 都是 scope 包）。
 >
-> **为什么用 noreply 邮箱**：它把提交绑定到 GitHub 账号 `nydsg`，贡献图会计到你名下，同时不必公开真实邮箱。你本机 `.gitconfig` 里现在是 `liguanhua <508865804@qq.com>`，与账号名不一致——照下面第 1 步改掉。若你更想用真实邮箱，把 `user.email` 换成它即可（但要在 GitHub 账号里验证过该邮箱才会计入贡献图）。
+> **为什么用 noreply 邮箱**：它把提交绑定到 GitHub 账号 `nydsg`，贡献图计入你名下，同时不必公开真实邮箱。你全局配置里仍是 `liguanhua <508865804@qq.com>`——本仓库单独覆盖了，所以不影响你其它项目。
 
 ---
 
-## 第 0 步：装 git（一次性）
+## 关于 git 的两个坑（已在本机验证过）
+
+1. **git 不在 PATH 上。** 实际可用的是 `D:\git\Git\cmd\git.exe`；而用户 PATH 里那条 `D:\GItHub\Git\cmd` 指向一个**不存在的目录**（注册表 `HKLM\SOFTWARE\GitForWindows\InstallPath` 也是这个旧路径 `D:\GItHub\Git`，所以 `winget list` 会显示 Git 已安装，但直接敲 `git` 会报找不到）。要用的话：
+
+   ```powershell
+   # 临时（当前窗口有效）
+   $env:PATH += ";D:\git\Git\cmd"
+
+   # 或永久修正用户 PATH（把坏的那条换掉）
+   [Environment]::SetEnvironmentVariable("PATH", (($env:PATH -split ';' | Where-Object { $_ -ne 'D:\GItHub\Git\cmd' }) -join ';'), "User")
+   ```
+
+2. **凭据已经在 Windows 凭据管理器里了**（`git push` 认证通过，不需要重新登录）。Git Credential Manager 位于 `D:\git\Git\mingw64\bin\git-credential-manager.exe`，git 的 system 配置里已挂上。
+
+## 之后推送（仓库已就绪，这是日常流程）
 
 ```powershell
-winget install --id Git.Git -e --source winget
+cd D:\Codex-workspace\dsh-mindmap
+node tools/test.mjs                       # 必须绿
+git add -A
+git commit -m "fix: ..."
+git push
 ```
 
-装完**新开一个终端**（让 PATH 生效），确认：
-
-```powershell
-git --version
-```
-
-## 第 1 步：设置提交身份（只需一次）
-
-```powershell
-git config --global user.name "nydsg"
-git config --global user.email "274722888+nydsg@users.noreply.github.com"
-```
-
-## 第 2 步：推送前最后自检
+## 第 1 步：发包前最后自检
 
 ```powershell
 cd D:\Codex-workspace\dsh-mindmap
@@ -52,33 +64,15 @@ npm pack --dry-run
 
 应当只包含 `lib/`、`cordis.patch.yml`、`README.md`、`README.en.md`、`CHANGELOG.md`、`LICENSE`、`package.json`。
 
-## 第 3 步：建仓库并推送
+## 第 2 步：仓库页面上的两件收尾（网页操作，还没做）
 
-先到 GitHub 建一个**空仓库**：<https://github.com/new> → 名字 `dsh-mindmap` → **Public** → 下面的 README / .gitignore / LICENSE **一个都不要勾**（勾了会产生一次初始提交，和本地历史冲突）→ Create。
+1. **About**（仓库右上角齿轮）：
+   - Description 已经帮你填好了（用文案包里的 60 字版）；若想改：
+     `DSH 对话思维导图：左侧总标题起步、向右单向展开的横向层级树，扁平化简约，零网络。`
+   - Topics 建议加：`dsh` `dsh-plugin` `deepseek-harness` `mindmap` `mind-map` `visualization` `plugin`
+2. **Social preview**（Settings → General → Social preview）：上传 `docs/screenshot.png`，链接分享出去才有图。
 
-然后：
-
-```powershell
-cd D:\Codex-workspace\dsh-mindmap
-git init -b main
-git add .
-git commit -m "feat: DSH conversation mind map plugin (v1.1.0)"
-git remote add origin https://github.com/nydsg/dsh-mindmap.git
-git push -u origin main
-```
-
-推送时会弹出 GitHub 登录（浏览器或粘贴 Personal Access Token）。若用 token：Settings → Developer settings → Personal access tokens → 需要 `repo` 权限。
-
-推送成功后，仓库首页的 test 徽章会在第一次 Actions 跑完后变绿（约 1 分钟）。
-
-### 建完仓库后建议做两件事（网页上操作）
-
-1. **仓库 About**（右上角齿轮）：
-   - Description：`DSH 对话思维导图：左侧总标题起步、向右单向展开的横向层级树，扁平化简约风格。全部本地计算，零网络。`
-   - Topics：`dsh` `dsh-plugin` `deepseek-harness` `mindmap` `visualization` `plugin`
-2. **Social preview**（Settings → General → Social preview）：上传 `docs/screenshot.png`，这样链接分享出去有图。
-
-## 第 4 步：发布到 npm
+## 第 3 步：发布到 npm
 
 先登录：
 
@@ -104,12 +98,13 @@ npm publish --registry=https://registry.npmjs.org/ --access public
 npm view @nydsg/dsh-mindmap version --registry=https://registry.npmjs.org/
 ```
 
-## 第 5 步：验证安装命令真的可用
+## 第 4 步：验证安装命令真的可用
 
 在**另一台机器**上（或先清掉本机的开发安装）：
 
 ```powershell
-dsh plugin --profile web add @nydsg/dsh-mindmap
+dsh plugin --profile <你的 profile> add @nydsg/dsh-mindmap
+# 本机是 desktop：dsh plugin --profile desktop add @nydsg/dsh-mindmap
 ```
 
 重启 Harness，会话顶部应出现第三个页签「导图」。
@@ -121,7 +116,7 @@ dsh plugin --profile web add @nydsg/dsh-mindmap
 > ```
 > 两者**不能并存**——同一个 id 出现两个 loader 条目会让启动失败。
 
-## 第 6 步：提交到插件市场
+## 第 5 步：提交到插件市场
 
 市场**不直接收录仓库**：它的清单来自策展仓库 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（站点与市场都从 `awesome-dsh-plugin.com/plugins.json` 实时拉取）。
 
