@@ -1,0 +1,10 @@
+# The published tarball is exactly: lib/ + cordis.patch.yml + docs + LICENSE.
+# package.json's `files` allow-list already does this; this file makes it explicit
+# and keeps accidental additions out even if `files` is edited carelessly.
+*
+!lib/**
+!cordis.patch.yml
+!README.md
+!CHANGELOG.md
+!LICENSE
+!package.json

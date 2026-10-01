@@ -1,0 +1,77 @@
+{
+  "name": "@nydsg/dsh-mindmap",
+  "version": "1.1.0",
+  "description": "DSH conversation mind map: one horizontal hierarchy that starts at a single left-hand title node (the first question) and opens rightwards — every turn is a card showing only your question, auto-linked to the earlier question it continues. Flat 1px outlines and square corners, no shadows, no gradients. Click a card for the reply, tool calls, keyword weights, and suggested follow-ups. 中文：把 DSH 对话轨迹渲染成一张从左到右的横向层级树，左侧唯一的起始总标题节点（= 第 1 轮提问）向右逐层展开，扁平化简约风格；按提问相似度自动续接分支，可手动改父节点；本地分析，零网络。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "harness",
+    "plugin",
+    "mindmap",
+    "mind-map",
+    "branch",
+    "trajectory",
+    "conversation",
+    "visualization",
+    "keyword",
+    "思维导图",
+    "分支树",
+    "对话轨迹"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "nydsg",
+    "url": "https://github.com/nydsg"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nydsg/dsh-mindmap.git"
+  },
+  "homepage": "https://github.com/nydsg/dsh-mindmap#readme",
+  "bugs": {
+    "url": "https://github.com/nydsg/dsh-mindmap/issues"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "node tools/test.mjs",
+    "test:check": "node tools/check.mjs",
+    "test:behaviour": "node tools/behaviour.mjs",
+    "test:registration": "node tools/registration.mjs",
+    "showcase": "node tools/showcase.mjs",
+    "report": "node tools/make-report.mjs",
+    "screenshot": "node tools/screenshot.mjs",
+    "prepack": "node tools/test.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "sideEffects": false
+}

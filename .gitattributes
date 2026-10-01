@@ -1,0 +1,23 @@
+# Line endings are LF everywhere, on every platform.
+#
+# This is not cosmetic. The plugin ships as a hand-authored bundle that the DSH
+# client evaluates as-is, and the published tarball is what users install — if a
+# Windows checkout rewrote the bundle to CRLF while a Linux checkout did not, the
+# artifact would differ per contributor, and a gate that reads the bundle as text
+# (check/registration both do) could pass in one checkout and fail in another.
+# Pinning `eol=lf` makes the committed bytes the same for everyone.
+* text=auto eol=lf
+
+# Never touch these: a rewritten PNG is a corrupt PNG, and the shell/command
+# shims some tools ship must keep their own endings.
+*.png binary
+*.ico binary
+*.gif binary
+*.jpg binary
+*.woff binary
+*.woff2 binary
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Generated, but reviewed like source: keep diffs line-by-line.
+tools/TEST-REPORT.md text eol=lf

@@ -1,0 +1,24 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+.idea/
+.vscode/
+
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Package manager scratch
+*.tgz
+.npm/
+.pnpm-store/
+
+# Local scratch: earlier revisions of the tooling were verified through
+# throwaway probes; they are not part of the project.
+tools/probe-*.mjs
+tools/*-output.txt
+client.before-*.js

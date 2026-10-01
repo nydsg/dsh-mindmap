@@ -1,0 +1,21 @@
+# dsh-mindmap bundle patch —— 标准 bundle 自挂载。
+#
+# 只要任意 DSH profile 把本包加进 dsh.profile.bundles（`dsh plugin add` 即自动完成），
+# 本文件就会把插件行插进该 profile 的 loader 树。
+#
+# 行的 `name` 必须是包名原样：
+#   * Host 半：Node 导入说明符，解析到 package.json 的 main -> lib/index.js
+#   * Client 半：dsh-client-modules 扫描的键，经 exports["./client"] -> lib/client.js
+# 一行同时承载两半，无需第二个 loader 行。
+#
+# `id` 是稳定身份：更晚的补丁层可用该 id 做 "id 定向覆盖"（不是再 insert 一次同 id 的行，
+# 否则会触发 duplicate loader entry id 启动失败）。
+
+#
+# 两处 `@` 都必须加引号：js-yaml 4 严格按 YAML 规范拒绝以 `@` 开头的 **plain scalar**
+# （`@` 是保留指示符），未加引号会在插件安装校验阶段直接报
+# `bad indentation of a mapping entry` 并回滚整次安装。
+
+- insert:
+    - id: '@nydsg/dsh-mindmap'
+      name: '@nydsg/dsh-mindmap'

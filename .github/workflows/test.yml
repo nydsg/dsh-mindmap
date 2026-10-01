@@ -1,0 +1,44 @@
+# The plugin ships no build step, so CI is just the gates — but they must run on
+# every push, because the bundle is hand-authored JavaScript and a typo in it
+# takes the whole view down silently.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The plugin targets the DSH Web client, but the gates are pure Node and
+        # run on any supported runtime. Pinning two versions keeps a Node-only
+        # regression (Intl.Segmenter behaviour, in particular) from shipping.
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No `npm ci`: the package has no runtime or dev dependencies at all.
+      - name: check (syntax, plugin face, CSS tokens)
+        run: node tools/check.mjs
+
+      - name: behaviour (segmentation, scoring, layout geometry)
+        run: node tools/behaviour.mjs
+
+      - name: registration (inject contract, structural invariants)
+        run: node tools/registration.mjs
+
+      # The gates must be able to fail. This reintroduces each historical bug and
+      # asserts the named gate catches it.
+      - name: mutation verification
+        run: node tools/test.mjs
+
+      - name: package contents
+        run: node tools/verify-pack.mjs

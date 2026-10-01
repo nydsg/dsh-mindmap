@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How the branch decision works
+    url: https://github.com/nydsg/dsh-mindmap#分支是怎么定的
+    about: The threshold, why the score is not a cosine, and the measured score tables.
+  - name: Traps worth reading before changing the bundle
+    url: https://github.com/nydsg/dsh-mindmap#踩过的坑别再犯
+    about: Four bugs that cost real time — the inject() face, cross-realm instanceof, React emulation in tests, and the YAML manifest.
