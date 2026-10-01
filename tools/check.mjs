@@ -16,7 +16,7 @@
  * Run: node tools/check.mjs
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import vm from "node:vm";
@@ -47,6 +47,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const clientPath = repoPath(here, join("lib", "client.js"));
 const hostPath = repoPath(here, join("lib", "index.js"));
 const source = readFileSync(clientPath, "utf8");
+/**
+ * Repository root, for the checks that walk the whole tree rather than one file.
+ *
+ * Derived from the located bundle instead of `import.meta.url`, so a mutation copy
+ * (which has tools/ and lib/ in a throwaway tree) is walked rather than the real
+ * repository — the same reason `repoPath` probes beside itself first.
+ */
+const REPO_ROOT = dirname(dirname(clientPath));
 
 const problems = [];
 const notes = [];
@@ -209,6 +217,49 @@ if (registered.length !== 1) {
 				notes.push(`manifest: one loader row for ${ids[0]}`);
 			}
 		}
+	}
+}
+
+// ── 1c. line endings ───────────────────────────────────────────────────────
+//
+// Every text file in this repo must be LF. `.gitattributes` says so, but that only
+// governs what git WRITES — a tool that rewrites a file in place with Windows line
+// endings leaves a working copy that disagrees with the repository, and the damage
+// is not cosmetic here: a gate that reads the bundle with a regex expecting `\n`
+// suddenly finds `\r\n` and reports "could not locate the CSS template literal",
+// which looks like a broken bundle rather than a broken checkout. That happened,
+// twice, from scripted edits. So the property is gated rather than trusted.
+
+{
+	const offenders = [];
+	const walk = (dir) => {
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			if (entry.name === ".git" || entry.name === "node_modules") continue;
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) {
+				walk(path);
+				continue;
+			}
+			let buffer;
+			try {
+				buffer = readFileSync(path);
+			} catch {
+				continue;
+			}
+			if (buffer.includes(0)) continue; // binary: not our business
+			for (let i = 1; i < buffer.length; i += 1) {
+				if (buffer[i] === 0x0a && buffer[i - 1] === 0x0d) {
+					offenders.push(path.slice(REPO_ROOT.length + 1));
+					break;
+				}
+			}
+		}
+	};
+	walk(REPO_ROOT);
+	if (offenders.length > 0) {
+		fail(`these files use CRLF line endings; every text file must be LF (rewrite them with LF, do not "fix" the gate): ${offenders.join(", ")}`);
+	} else {
+		notes.push("line endings: LF throughout");
 	}
 }
 

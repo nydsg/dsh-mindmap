@@ -43,27 +43,28 @@ const OUT = join(REPO, "docs", "screenshot.png");
 /**
  * The sample conversation the picture shows, as `[prompt, reply]`.
  *
- * The replies are not decoration: the context signal reads them, and the picture is
- * supposed to show that signal doing its job — see the note on turn 6 below.
+ * Shaped like a real session, and that shape is the point:
+ *
+ *  - most turns CHAIN — a question follows the answer before it, whatever the
+ *    subject, which is the structural default;
+ *  - turn 5 is the other case: it names an older thread's words again (loader 行 /
+ *    id / 清单文件), so it rejoins that branch instead of the previous turn, and the
+ *    map shows a real branch rather than one strip.
+ *
+ * Kept to seven turns deliberately. Because the layout opens rightwards one column
+ * per level, a chain of N turns is a picture N columns wide — so even a truthful
+ * sample stops being a usable screenshot somewhere around here.
  */
 const SAMPLE = [
 	["我要给 DSH 写一个插件，先把项目结构搭起来", "先分两半：宿主半边只导出 apply，客户端半边注册视图。"],
 	["这个插件的清单文件怎么写，cordis.patch.yml 要放哪", "放在包根目录，dsh.bundle.patch 指向它；两处 @ 记得加引号，否则 YAML 解析会拒绝整个文件。"],
 	["插件装完了要重启 Harness 吗", "要。客户端模块图与 bundle 路由在启动时一次性生成，热加载不会让新的 bundle 路由凭空出现。"],
-	["dsh 插件安装失败怎么排查 profile 配置", "看 profile 下 .plugin-manager 的 pnpm.log，安装被回滚时会恢复 package.json 与 pnpm-lock.yaml。"],
 	["插件的客户端半边怎么注册一个新的会话视图页签", "往 conversation.view 插槽注册，id 用页签名，改完要重启才生效。"],
-	["思维导图视图的卡片配色能不能换成深色主题", "别写死颜色，全部走令牌层：卡片底色跟 --mm-fill，描边用 --mm-line-strong 会更清楚，小字不要低于 4.5:1。"],
-	// Kept natural on purpose. An innocent follow-up here shares `描边/小字/4.5` with
-	// turn 6's QUESTION, so the wording matcher links it — which is the honest
-	// outcome, and the picture should show what the plugin does rather than a case
-	// staged to show off one signal. The context signal's own case (a question that
-	// shares NOTHING with any question but everything with a reply) is proven by
-	// `tools/showcase.mjs` case F and by the behaviour gate.
-	["描边在小字上也要 4.5:1 吗", "描边不是文字，不适用正文那个门槛；小字仍然要 4.5:1。"],
-	["横向树的连线总是画不出来，是不是要等渲染完再量坐标", "对，量出来的布局永远晚一帧，漏一次测量连线层就空了。"],
-	["那改成用深度算列、用整齐树算行，父节点居中在子节点之间", "这样父节点会落在它子树的区间里，连线自然成扇形，也不会往回折。"],
-	["我想给这张图加一个最左侧的总标题节点", "那它就占第 0 列，所有分支起点挂在它下面，全图只剩一个没有父节点的节点。"],
-	["总标题的文案用第 1 轮提问，还是我自己填一个", "用第 1 轮提问，那是这场会话真正的开端，不必再造一个入口。"]
+	// Names the first thread's words again (清单文件 / loader 行 / id), so it rejoins
+	// turn 2 instead of continuing turn 4.
+	["清单文件里的 loader 行 id 能不能随便写", "id 是稳定身份，同一个 id 插两次会让启动失败。"],
+	["思维导图视图的卡片配色能不能换成深色主题", "别写死颜色，全部走令牌层：卡片底色跟 --mm-fill，描边用 --mm-line-strong。"],
+	["深色主题下卡片的对比度要满足多少", "正文 4.5:1，小字也一样；描边不适用那个门槛。"]
 ];
 
 /** Extract one `//#region name` block from the bundle. */
@@ -163,7 +164,9 @@ function card(box) {
 		? t("branch.firstTag")
 		: box.node.link.kind === "manual"
 			? t("branch.manualTag")
-			: t("branch.autoTag", { score: box.node.link.score.toFixed(2) });
+			: box.node.link.kind === "previous"
+				? t("branch.previousTag")
+				: t("branch.autoTag", { score: box.node.link.score.toFixed(2) });
 	const children = box.node.children.length;
 	return `<div class="mm-card${fromAnchor ? " mm-card--first" : ""}" style="left:${box.x}px;top:${box.y}px;width:${CARD_W}px">
 	<button type="button" class="mm-card__face">
@@ -329,9 +332,10 @@ if (browser === null) {
 }
 
 // The window must clear the whole canvas plus the chrome above it, or the shot
-// clips the last row of cards.
+// clips the last row of cards. The chrome is the tab strip (40), the toolbar (~46),
+// the chart title (~40) and the chart's bottom padding (24).
 const width = Math.round(placed.width) + 380;
-const height = Math.round(placed.height) + 96;
+const height = Math.round(placed.height) + 40 + 46 + 40 + 24 + 8;
 const result = spawnSync(browser, [
 	"--headless=new",
 	"--disable-gpu",

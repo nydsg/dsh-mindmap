@@ -26,7 +26,10 @@ jobs:
           node-version: ${{ matrix.node }}
 
       # No `npm ci`: the package has no runtime or dev dependencies at all.
-      - name: check (syntax, plugin face, CSS tokens)
+      # `check` also validates the bundle manifest and asserts LF line endings
+      # everywhere — a Windows contributor's editor drifts those otherwise, and a
+      # CRLF bundle makes the text-reading gates fail for the wrong reason.
+      - name: check (syntax, plugin face, bundle manifest, line endings, CSS tokens)
         run: node tools/check.mjs
 
       - name: behaviour (segmentation, scoring, layout geometry)

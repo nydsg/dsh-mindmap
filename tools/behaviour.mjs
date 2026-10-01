@@ -45,7 +45,7 @@ ${region("lib/client/branching.js")}
 ${region("lib/client/chat-data.js")}
 ${region("lib/client/layout.js")}
 ${region("lib/client/outline.js")}
-return { segmentText, keywordsOf, termProfile, analyzeBackward, suggestQuestions, buildModel, outlineText, kindKey, STOPWORDS, cosineSimilarity, signalOverlap, questionProfiles, resolveLinks, overridesToRecord, overridesFromRecord, contextTextOf, contextVectors, contextResonance, contextCandidates, LINK_MIN_SCORE, LINK_CONTEXT_MIN_SCORE, layoutTree, placeTree, edgePath };
+return { segmentText, keywordsOf, termProfile, analyzeBackward, suggestQuestions, buildModel, outlineText, kindKey, STOPWORDS, cosineSimilarity, signalOverlap, questionProfiles, resolveLinks, overridesToRecord, overridesFromRecord, LINK_MIN_SCORE, layoutTree, placeTree, edgePath };
 `;
 
 /** A few stopwords that must never survive segmentation, sampled from the engine's own list. */
@@ -235,13 +235,33 @@ eq(empty.total, 0, "an absent snapshot must report zero modules");
 
 	ok(node(1).parent === null, "the first question must be a branch root");
 	ok(node(2).parent === "turn:1", `turn 2 is about the same install topic and should continue turn 1, got ${node(2).parent}`);
-	ok(node(3).parent === null, "an unrelated question must start its own branch");
+	// Turn 2 links to turn 1 because of the QUESTION threshold, not because the
+	// chain caught it — and the label is what tells those two apart. Asserting only
+	// the parent would stay green if the threshold were dropped to zero, because the
+	// chain would attach the same parent for a different reason. (It did: this
+	// assertion is here because a mutation proved the gate blind without it.)
+	ok(node(2).link.kind === "auto", `turn 2 must be reported as a wording match, got ${node(2).link.kind}`);
+	ok(
+		node(2).link.score >= api.LINK_MIN_SCORE,
+		`a wording match must clear the threshold, got ${node(2).link.score}`
+	);
+	// Turn 3 changes subject and STILL follows turn 2. The rule is structural: the
+	// next question follows the last answer, so a new subject does not by itself
+	// start a new branch. An earlier release treated "continue the previous turn" as
+	// a similarity claim that had to be earned, and ended up sending 8 of 9 real
+	// follow-ups to their own branch. Only a wording match to an OLDER question
+	// breaks the chain (turn 4 below), and a manual pin always can.
+	ok(
+		node(3).parent === "turn:2",
+		`a new subject must still follow the previous turn unless it names an older one, got ${node(3).parent}`
+	);
+	ok(node(3).link.kind === "previous", "a structural continuation must be labelled as one, not as a wording match");
 	ok(
 		node(4).parent === "turn:1" || node(4).parent === "turn:2",
 		`turn 4 revisits the install topic and should join that branch, got ${node(4).parent}`
 	);
 	ok(!forest.nodes.has(node(4).parent) === false, "a linked turn's parent must exist in the forest");
-	ok(forest.roots.length === 2, `expected 2 branch roots, got ${forest.roots.length}`);
+	ok(forest.roots.length === 1, `only the first turn may be a root, got ${forest.roots.length}`);
 	ok(node(1).children.length >= 1, "a branch root must own at least one continuation");
 
 	/*
@@ -305,7 +325,9 @@ eq(empty.total, 0, "an absent snapshot must report zero modules");
 	ok(pinned.nodes.get("turn:2").link.kind === "manual", "a pinned root must be labelled manual, not mistaken for an unmatched turn");
 	ok(pinned.nodes.get("turn:4").parent === "turn:3", "a pinned parent must win over the matcher's own choice");
 	ok(pinned.nodes.get("turn:4").link.kind === "manual", "a pinned link must be labelled manual");
-	ok(pinned.roots.length >= 3, `pinning turn 2 as a root must add a root, got ${pinned.roots.length}`);
+	// Pinning turn 2 as a root splits the chain: turn 1 and turn 2 are now both
+	// roots, and turn 3 — which followed turn 2 structurally — still follows it.
+	ok(pinned.roots.length >= 2, `pinning turn 2 as a root must add a root, got ${pinned.roots.length}`);
 
 	// Round-tripping the persisted arrangement must not lose the "branch root"
 	// distinction — a plain object cannot carry an explicit null-versus-absent.
@@ -333,147 +355,83 @@ eq(empty.total, 0, "an absent snapshot must report zero modules");
 }
 
 /*
- * The CONTEXT signal.
+ * The structural rule: a question follows the answer before it.
  *
- * The plugin could only ever compare a question against earlier QUESTIONS, which
- * meant a follow-up that reused the reply's vocabulary — "--mm-line-strong 在小字
- * 上够 4.5:1 吗" after a reply that said "--mm-line-strong" — started a new branch
- * even though the thread was obvious to a reader.
- *
- * The property that has to hold is a SEPARATION, not a single result: a genuine
- * context continuation must score above the gate, and a reply that merely NAMES a
- * term the next question asks about must stay below it. Asserting only "the
- * follow-up links" would stay green under a gate lowered to zero, which is exactly
- * the mistake the README's last trap describes.
+ * This block exists because the previous release got exactly this wrong. It treated
+ * "continue the previous turn" as a guess that had to be EARNED by lexical overlap,
+ * and measured against the real sessions on this machine
+ * (`tools/measure-sessions.mjs`) real follow-ups scored 0.00-0.33 on every overlap
+ * measure — they are pronoun-like and short, and repeat almost none of the reply's
+ * nouns. So the gate refused them and sent 8 of 9 real follow-ups to their own
+ * branch. The assertions below are written at the level that failure lived on: the
+ * SHAPE of the tree for a plain back-and-forth, with no clever vocabulary in it.
  */
 {
-	/** Build a turn model with the context fields the matcher reads. */
-	const turn = (id, prompt, answer, tools = []) => ({
-		id,
-		number: Number(id.split(":")[1]),
-		promptText: prompt,
-		answerText: answer,
-		text: `${prompt}\n${answer}`,
-		modules: tools.map((title, i) => ({ kind: "tool", title, seq: i }))
-	});
-
-	// The reply introduces a term no question uses; the follow-up asks about it.
-	const contextCase = [
-		turn("turn:1", "我在调 DSH 插件的深色主题", "深色主题要改令牌层，别改组件里的颜色。"),
-		turn("turn:2", "那卡片描边的对比度要调到多少", "正文按 4.5:1，12px 的小字也要 4.5:1。描边可以用 --mm-line-strong，视觉上更清楚。"),
-		turn("turn:3", "--mm-line-strong 在小字上够 4.5:1 吗", "描边不是文字，不适用那个门槛。")
+	const plain = (number, prompt) => ({ id: `turn:${number}`, number, promptText: prompt, text: prompt });
+	// Deliberately pronoun-like and topic-free, the way real follow-ups read.
+	const conversation = [
+		plain(1, "帮我把这个插件的清单文件修一下"),
+		plain(2, "好的"),
+		plain(3, "那接下来呢"),
+		plain(4, "对，就这样")
 	];
-	const contextForest = api.resolveLinks(contextCase, new Map());
-	const contextNode = contextForest.nodes.get("turn:3");
-	eq(contextNode.parent, "turn:2", "a follow-up that reuses the reply's vocabulary must link to that turn");
-	eq(contextNode.link.kind, "context", "a link made on context must say so, not be reported as a wording match");
-	ok(contextNode.link.score >= api.LINK_CONTEXT_MIN_SCORE, `a context link must clear the gate, got ${contextNode.link.score}`);
+	const forest = api.resolveLinks(conversation, new Map());
 
-	// The same conversation, with the reply's vocabulary removed: the follow-up now
-	// shares nothing and must start its own branch. This is what proves the link
-	// above came from the CONTEXT and not from some background overlap.
-	const withoutContext = contextCase.map((entry, index) => (index === 1 ? { ...entry, answerText: "已处理。" } : entry));
-	eq(api.resolveLinks(withoutContext, new Map()).nodes.get("turn:3").parent, null, "without the reply's vocabulary the same question must start a new branch");
+	eq(forest.roots.length, 1, `a back-and-forth must produce exactly one root, got ${forest.roots.length}`);
+	eq(forest.roots[0].turn.id, "turn:1", "the first turn must start the map");
+	// The chain is the whole point: every later turn is a child of the one before it,
+	// so the drawn tree is one column per turn rather than a row of unrelated roots.
+	for (let number = 2; number <= 4; number += 1) {
+		const node = forest.nodes.get(`turn:${number}`);
+		eq(node.parent, `turn:${number - 1}`, `turn ${number} must continue turn ${number - 1}, not start a new branch`);
+		eq(node.link.kind, "previous", `turn ${number} must be labelled as a continuation, not as a wording match`);
+	}
+	const depthOf = (id) => {
+		let depth = 0;
+		let walker = forest.nodes.get(id);
+		while (walker !== undefined && walker.parent !== null) {
+			depth += 1;
+			walker = forest.nodes.get(walker.parent);
+		}
+		return depth;
+	};
+	eq(depthOf("turn:4"), 3, "four turns of back-and-forth must nest four deep, not sit side by side");
 
-	// The refusal case. A reply that mentions the term in passing — while the thread
-	// is plainly something else — must NOT link, and its score is the upper bound the
-	// gate has to stay above.
-	const passingMention = [
-		turn("turn:1", "帮我看看这个报错栈", "这是权限问题。顺带一提，重新打包不会影响 profile 的锁定文件。"),
-		turn("turn:2", "profile 的锁定文件要不要一起提交", "要。")
-	];
-	const mentionForest = api.resolveLinks(passingMention, new Map());
-	eq(mentionForest.nodes.get("turn:2").parent, null, "a mere passing mention in the reply must not create a link");
+	// The first turn is the only one with no parent, and it is not labelled as a
+	// continuation of anything.
+	eq(forest.nodes.get("turn:1").parent, null, "the first turn must have no parent");
+	eq(forest.nodes.get("turn:1").link.kind, "root", "the first turn must be labelled a branch root");
 
-	const mentionScore = api.contextResonance(
-		api.questionProfiles(passingMention)[1],
-		api.contextVectors(passingMention)[0]
-	);
-	const genuineScore = api.contextResonance(
-		api.questionProfiles(contextCase)[2],
-		api.contextVectors(contextCase)[1]
-	);
-	ok(
-		mentionScore < api.LINK_CONTEXT_MIN_SCORE && genuineScore >= api.LINK_CONTEXT_MIN_SCORE,
-		`the gate must separate a passing mention from a genuine continuation, got ${mentionScore} vs ${genuineScore}`
-	);
-	ok(
-		genuineScore - mentionScore > 0.2,
-		`the two classes must be far apart, not merely on either side of the gate: got ${mentionScore} vs ${genuineScore}`
-	);
-
-	// A context link is a SECOND chance, never a competitor: an explicit question
-	// match must still win even when the context score is also above the gate.
-	const bothSignals = [
-		turn("turn:1", "我要给 DSH 写一个插件", "先搭目录结构。"),
-		turn("turn:2", "这个 DSH 插件怎么做思维导图视图", "注册 conversation.view 页签，然后用思维导图视图布局。"),
-		turn("turn:3", "思维导图视图的分支连线怎么画", "用思维导图视图的算术坐标，别量 DOM。")
-	];
-	const bothForest = api.resolveLinks(bothSignals, new Map());
-	eq(bothForest.nodes.get("turn:3").link.kind, "auto", "a question match must win over a context match when both are available");
-
-	// Manually pinning still beats both signals.
-	const pinnedForest = api.resolveLinks(bothSignals, new Map([["turn:3", null]]));
-	eq(pinnedForest.nodes.get("turn:3").parent, null, "a manual pin must suppress the context signal too");
-	eq(pinnedForest.nodes.get("turn:3").link.kind, "manual", "a pinned turn must stay labelled manual");
-
-	// A missing module list or answer must degrade to "no context", never throw.
-	const sparse = api.resolveLinks([{ id: "turn:1", number: 1, promptText: "第一轮问题", text: "第一轮问题" }], new Map());
-	eq(sparse.nodes.get("turn:1").parent, null, "a turn with no modules and no reply must resolve without throwing");
-	eq(api.contextTextOf({ id: "turn:9", promptText: "只", text: "只" }), "只", "contextTextOf must tolerate a missing module list");
-	eq(api.contextResonance(undefined, undefined), 0, "contextResonance must tolerate missing profiles");
+	// A one-turn session must not invent a parent.
+	const single = api.resolveLinks([plain(1, "只有一个问题")], new Map());
+	eq(single.nodes.get("turn:1").parent, null, "a single turn must be a root");
 
 	/*
-	 * WHICH TEXT DEFINES "BACKGROUND" is the load-bearing decision in the context
-	 * vector, and it cannot be pinned end-to-end: an end-to-end case only moves when
-	 * a term's weight CHANGE flips a winner, which needs a term that is signal in the
-	 * new question while also appearing in several answers. So the property is
-	 * asserted directly.
-	 *
-	 * The property: document frequency counts QUESTIONS. A term that also shows up in
-	 * another turn's REPLY must not be demoted for it — otherwise one chatty answer
-	 * silently redefines the session's background and reweights every other score.
+	 * The one way the chain breaks: an explicit WORDING match to an older question.
+	 * That has to keep working, or returning to an earlier thread becomes impossible.
 	 */
-	{
-		// Latin probe terms on purpose: the segmenter keeps a Latin run as ONE token,
-		// while a Chinese word with no dictionary entry is split into single
-		// characters (a documented limit). The probe must not depend on that.
-		//
-		// Both terms occur exactly ONCE in the context text of the turn that carries
-		// them, so the only thing that differs between them is WHICH turn's reply
-		// mentioned them — that is the variable under test. (A probe term that also
-		// appeared in its own turn's prompt would score higher through the term-count
-		// factor and prove nothing about document frequency.)
-		const alpha = "alphaterm";
-		const beta = "betaterm";
-		const filler = "fillermterm";
-		const probe = [
-			{ id: "turn:1", number: 1, promptText: `第一问 ${filler}`, answerText: `${alpha} 的解释`, text: "", modules: [] },
-			{ id: "turn:2", number: 2, promptText: "第二问", answerText: `${alpha} 又提`, text: "", modules: [] },
-			{ id: "turn:3", number: 3, promptText: "第三问", answerText: `${beta} 只在`, text: "", modules: [] }
-		];
-		const vectors = api.contextVectors(probe);
-		const weightAlpha = vectors[0].get(alpha);
-		const weightBeta = vectors[2].get(beta);
-		ok(weightAlpha !== undefined && weightBeta !== undefined, "both probe terms must survive into the context vectors");
-		ok(
-			Math.abs(weightAlpha - weightBeta) < 1e-9,
-			`a term's weight must come from its QUESTION frequency and how often it occurs, not from which turn's reply said it: ${alpha}=${weightAlpha} ${beta}=${weightBeta}`
-		);
-		// And the question-level frequency must still bite: a term used by two
-		// questions is background compared with one used by a single question.
-		const demoted = api.contextVectors([
-			{ id: "turn:1", number: 1, promptText: `共同 ${alpha}`, answerText: "甲", text: "", modules: [] },
-			{ id: "turn:2", number: 2, promptText: `共同 ${alpha}`, answerText: "乙", text: "", modules: [] },
-			{ id: "turn:3", number: 3, promptText: "独有", answerText: `${beta} 的说明`, text: "", modules: [] }
-		]);
-		ok(
-			(demoted[2].get(beta) ?? 0) > (demoted[0].get(alpha) ?? 0),
-			"a term two questions share is background and must weigh less than one only a single question names"
-		);
-	}
-}
+	const returning = [
+		plain(1, "插件安装到 dsh 的 profile 需要重启吗"),
+		plain(2, "思维导图的卡片配色能不能换成深色主题"),
+		plain(3, "插件安装完了还是要重启 profile 吗")
+	];
+	const returningForest = api.resolveLinks(returning, new Map());
+	eq(returningForest.nodes.get("turn:3").parent, "turn:1", "a turn that names an older question's words must rejoin that thread, not the previous turn");
+	eq(returningForest.nodes.get("turn:3").link.kind, "auto", "a wording match must be labelled as one");
 
+	// Manual overrides still beat both rules, including the structural default.
+	const pinned = api.resolveLinks(conversation, new Map([["turn:4", null], ["turn:3", "turn:1"]]));
+	eq(pinned.nodes.get("turn:4").parent, null, "pinning a turn as a branch root must beat the structural chain");
+	eq(pinned.nodes.get("turn:4").link.kind, "manual", "a pinned root must stay labelled manual");
+	eq(pinned.nodes.get("turn:3").parent, "turn:1", "pinning an explicit parent must beat the structural chain");
+
+	// A turn with no module list and no reply must resolve without throwing: the
+	// projection may always lose a field, and the gates' own fixtures carry no
+	// modules at all.
+	const sparse = api.resolveLinks([{ id: "turn:1", number: 1, promptText: "第一轮问题", text: "第一轮问题" }], new Map());
+	eq(sparse.nodes.get("turn:1").parent, null, "a turn with no modules and no reply must resolve without throwing");
+	eq(api.resolveLinks([], new Map()).roots.length, 0, "an empty session must resolve to an empty forest");
+}
 // ── horizontal layout geometry ────────────────────────────────────────────
 //
 // "The mind map has no lines drawn" is what prompted the horizontal rewrite, so

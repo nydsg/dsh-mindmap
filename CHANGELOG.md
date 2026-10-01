@@ -4,7 +4,64 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — a question follows the answer before it
+
+### Changed — the matching rule
+
+- **A turn with no wording match now continues the turn immediately before it,
+  instead of starting its own branch.** In a conversation the next question follows
+  the last answer; that is structure, and it no longer has to be earned by scoring
+  above a threshold. Three kinds of link are labelled separately, because they are
+  three different claims: `自动匹配 {score}` (a wording match to an earlier
+  question), `接上一轮` (a structural continuation), `手动指定`.
+- **The two-step similarity rule from 1.2.0 is withdrawn.** It required a wording
+  score of `0.40` and, failing that, a "context resonance" of `0.65` before a turn
+  could be treated as continuing anything. Measured against this machine's real
+  sessions by the new `tools/measure-sessions.mjs`:
+
+  | Measure | Real follow-ups |
+  |---|---|
+  | Wording score reaching `0.40` | 0 / 9 |
+  | Best resonance with the previous turn | 0.33 |
+  | Follow-ups the old rule sent to their own branch | 9 / 9 |
+
+  Real follow-ups are pronoun-like and short ("是对的", "我在终端执行完了") and repeat
+  almost none of the previous reply's nouns, so **no similarity threshold can
+  decide "does this continue the previous turn"**: a gate high enough to refuse a
+  topic change refuses real follow-ups too. After the fix, the same data gives
+  9 of 9 chained and 0 misjudged.
+
+### Added
+
+- **`tools/measure-sessions.mjs`** — measures the rule against the sessions actually
+  on this machine. It decompresses the multi-frame zstd logs under
+  `~/.dsh/sessions` (a single `zstdDecompressSync` call returns only the 199-byte
+  session header of a multi-megabyte file), reconstructs each turn's question and
+  reply from the `user/message` and `assistant/message` records, and filters out
+  host-injected blocks, which arrive as user messages too and would otherwise look
+  like perfect continuations of each other.
+
+### Removed
+
+- **The context signal** (`contextTextOf` / `contextVectors` / `contextResonance` /
+  `contextCandidates`, `LINK_CONTEXT_MIN_SCORE`) and `tools/context-experiment.mjs`.
+  Its only evidence was a fixture I wrote myself, and on real follow-ups it fired
+  once in nine. Keeping an unvalidated mechanism because it looks sophisticated is
+  the thing this project's own README warns against.
+
+### Fixed
+
+- **A gate blind spot, found by mutation.** The behaviour gate asserted where a
+  wording match attaches but not that it *is* a wording match, so dropping
+  `LINK_MIN_SCORE` to zero stayed green. It now asserts the link kind and the score
+  as well. The one mutation that remains uncoverable — lowering the threshold — was
+  deleted rather than papered over; the reason is recorded in `tools/test.mjs`.
+
 ## [1.2.0] — the next question can link on context, not only on wording
+
+> **Superseded by 1.3.0.** The mechanism added here did not survive measurement and
+> was removed; see 1.3.0. It is kept in the record because the way it failed is the
+> useful part.
 
 ### Added
 

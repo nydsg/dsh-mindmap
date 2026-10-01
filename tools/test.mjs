@@ -289,55 +289,38 @@ mutation(
 	}),
 	"behaviour.mjs"
 );
-
 mutation(
-	"drop the context signal (the follow-up that reuses the reply's words goes back to being a new branch)",
+	"stop chaining: send a question with no wording match to its own branch again (the bug that shipped in 1.2.0)",
 	(files) => ({
 		...files,
 		"lib/client.js": files["lib/client.js"].replace(
-			"\t\t\t\t\t\tconst byContext = contextCandidates(index, profiles, contexts)[0];\n\t\t\t\t\t\tif (byContext !== undefined && byContext.score >= LINK_CONTEXT_MIN_SCORE) {",
-			"\t\t\t\t\t\tconst byContext = contextCandidates(index, profiles, contexts)[0];\n\t\t\t\t\t\tif (false && byContext !== undefined && byContext.score >= LINK_CONTEXT_MIN_SCORE) {"
+			"\t\t\t\t\t} else if (index > 0) {\n\t\t\t\t\t\tparent = turns[index - 1].id;\n\t\t\t\t\t\tscore = 0;\n\t\t\t\t\t\tkind = \"previous\";\n\t\t\t\t\t}",
+			"\t\t\t\t\t}"
 		)
 	}),
 	"behaviour.mjs"
 );
 
+// NOT here: "lower the wording threshold to zero". I tried it and removed it,
+// because the suite cannot refute it and a mutation case that is already green
+// proves nothing. Dropping LINK_MIN_SCORE only changes a decision when a candidate
+// scores strictly between 0 and the threshold, and no fixture produces such a
+// candidate — they either score 0 (the chain decides) or clear 0.4 (the wording
+// match decides). Adding a low-scoring fixture until the mutation turns red would
+// be writing the test to fit the claim. The wording SCORE's discriminating property
+// is covered by the raw-cosine mutation above instead, which asserts the separation
+// between a real match and a background-only pair.
 mutation(
-	"open the context gate all the way (a reply that merely mentions a term starts linking)",
+	"chain a turn to itself instead of the previous turn (the first turn must stay a root)",
 	(files) => ({
 		...files,
 		"lib/client.js": files["lib/client.js"].replace(
-			"\t\tconst LINK_CONTEXT_MIN_SCORE = 0.65;",
-			"\t\tconst LINK_CONTEXT_MIN_SCORE = 0;"
+			"\t\t\t\t\t} else if (index > 0) {\n\t\t\t\t\t\tparent = turns[index - 1].id;",
+			"\t\t\t\t\t} else if (index >= 0) {\n\t\t\t\t\t\tparent = turns[index].id;"
 		)
 	}),
 	"behaviour.mjs"
 );
-
-mutation(
-	"let the context signal outrank a question match instead of only filling in for it",
-	(files) => ({
-		...files,
-		"lib/client.js": files["lib/client.js"].replace(
-			"\t\t\t\t\tconst best = candidates[index][0];\n\t\t\t\t\tif (best !== undefined && best.score >= LINK_MIN_SCORE) {",
-			"\t\t\t\t\tconst best = candidates[index][0];\n\t\t\t\t\tif (false && best !== undefined && best.score >= LINK_MIN_SCORE) {"
-		)
-	}),
-	"behaviour.mjs"
-);
-
-mutation(
-	"build the context vector from the replies instead of the questions (one long reply redefines the background)",
-	(files) => ({
-		...files,
-		"lib/client.js": files["lib/client.js"].replace(
-			"\t\t\tconst questionDocuments = turns.map((turn) => new Set(termsOf(turn.promptText.length > 0 ? turn.promptText : turn.text)));\n\t\t\tconst documentFrequency = new Map();\n\t\t\tfor (const document of questionDocuments) {",
-			"\t\t\tconst questionDocuments = turns.map((turn) => new Set(termsOf(contextTextOf(turn))));\n\t\t\tconst documentFrequency = new Map();\n\t\t\tfor (const document of questionDocuments) {"
-		)
-	}),
-	"behaviour.mjs"
-);
-
 mutation(
 	"let the depth limit fold the title node itself (the whole map collapsed into one card)",
 	(files) => ({
@@ -348,6 +331,15 @@ mutation(
 		)
 	}),
 	"behaviour.mjs"
+);
+
+mutation(
+	"rewrite the bundle with Windows line endings (a scripted edit that leaves the checkout disagreeing with the repo)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(/\n/g, "\r\n")
+	}),
+	"check.mjs"
 );
 
 mutation(
