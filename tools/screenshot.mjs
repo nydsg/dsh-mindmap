@@ -40,19 +40,30 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = readFileSync(join(REPO, "lib", "client.js"), "utf8");
 const OUT = join(REPO, "docs", "screenshot.png");
 
-/** The sample conversation the picture shows. */
+/**
+ * The sample conversation the picture shows, as `[prompt, reply]`.
+ *
+ * The replies are not decoration: the context signal reads them, and the picture is
+ * supposed to show that signal doing its job — see the note on turn 6 below.
+ */
 const SAMPLE = [
-	"我要给 DSH 写一个插件，先把项目结构搭起来",
-	"这个插件的清单文件怎么写，cordis.patch.yml 要放哪",
-	"插件装完了要重启 Harness 吗",
-	"dsh 插件安装失败怎么排查 profile 配置",
-	"插件的客户端半边怎么注册一个新的会话视图页签",
-	"思维导图视图的卡片配色能不能换成深色主题",
-	"深色主题下卡片的对比度需要满足 4.5:1 吗",
-	"横向树的连线总是画不出来，是不是要等渲染完再量坐标",
-	"那改成用深度算列、用整齐树算行，父节点居中在子节点之间",
-	"我想给这张图加一个最左侧的总标题节点",
-	"总标题的文案用第 1 轮提问，还是我自己填一个"
+	["我要给 DSH 写一个插件，先把项目结构搭起来", "先分两半：宿主半边只导出 apply，客户端半边注册视图。"],
+	["这个插件的清单文件怎么写，cordis.patch.yml 要放哪", "放在包根目录，dsh.bundle.patch 指向它；两处 @ 记得加引号，否则 YAML 解析会拒绝整个文件。"],
+	["插件装完了要重启 Harness 吗", "要。客户端模块图与 bundle 路由在启动时一次性生成，热加载不会让新的 bundle 路由凭空出现。"],
+	["dsh 插件安装失败怎么排查 profile 配置", "看 profile 下 .plugin-manager 的 pnpm.log，安装被回滚时会恢复 package.json 与 pnpm-lock.yaml。"],
+	["插件的客户端半边怎么注册一个新的会话视图页签", "往 conversation.view 插槽注册，id 用页签名，改完要重启才生效。"],
+	["思维导图视图的卡片配色能不能换成深色主题", "别写死颜色，全部走令牌层：卡片底色跟 --mm-fill，描边用 --mm-line-strong 会更清楚，小字不要低于 4.5:1。"],
+	// Kept natural on purpose. An innocent follow-up here shares `描边/小字/4.5` with
+	// turn 6's QUESTION, so the wording matcher links it — which is the honest
+	// outcome, and the picture should show what the plugin does rather than a case
+	// staged to show off one signal. The context signal's own case (a question that
+	// shares NOTHING with any question but everything with a reply) is proven by
+	// `tools/showcase.mjs` case F and by the behaviour gate.
+	["描边在小字上也要 4.5:1 吗", "描边不是文字，不适用正文那个门槛；小字仍然要 4.5:1。"],
+	["横向树的连线总是画不出来，是不是要等渲染完再量坐标", "对，量出来的布局永远晚一帧，漏一次测量连线层就空了。"],
+	["那改成用深度算列、用整齐树算行，父节点居中在子节点之间", "这样父节点会落在它子树的区间里，连线自然成扇形，也不会往回折。"],
+	["我想给这张图加一个最左侧的总标题节点", "那它就占第 0 列，所有分支起点挂在它下面，全图只剩一个没有父节点的节点。"],
+	["总标题的文案用第 1 轮提问，还是我自己填一个", "用第 1 轮提问，那是这场会话真正的开端，不必再造一个入口。"]
 ];
 
 /** Extract one `//#region name` block from the bundle. */
@@ -77,13 +88,15 @@ const api = vm.runInContext(
 	sandbox
 );
 
-const turns = SAMPLE.map((prompt, index) => ({
+const turns = SAMPLE.map(([prompt, answer], index) => ({
 	id: `turn:${index + 1}`,
 	number: index + 1,
 	promptText: prompt,
+	// `text` and `answerText` both carry the reply: the matcher reads answerText,
+	// and the panel quote below uses text.
 	text: prompt,
+	answerText: answer,
 	hasPrompt: true,
-	answerText: "",
 	modules: [],
 	running: false,
 	error: false,
@@ -192,10 +205,12 @@ function moduleRow(kind, seq, title, selected) {
 </div>`;
 }
 
-const selectedTurn = turns[6];
+// The panel shows the turn that was LINKED BY CONTEXT (the last one), using its
+// real prompt and real reply, so the picture cannot drift from the sample above.
+const selectedTurn = turns[turns.length - 1];
 const rows = [
 	moduleRow("user", 18, selectedTurn.promptText, false),
-	moduleRow("assistant-step", 21, "对比度不需要靠色相区分，靠明度和描边就够了——4.5:1 是正文门槛，12px 的标签属于小字，要按 4.5:1 而不是 3:1。", true),
+	moduleRow("assistant-step", 21, selectedTurn.answerText, true),
 	moduleRow("tool", 22, "ripgrep: 搜索 --dsw-alias-label-secondary 的定义", false),
 	moduleRow("assistant-step", 24, "建议把卡片文字的对比度提到 7:1，次要文字保持 4.5:1 以上。", false),
 	moduleRow("context", 25, "已注入 3 条上下文：主题令牌表、字号规范、对比度要求。", false)
@@ -271,7 +286,7 @@ ${cards}
 		<aside class="mm-detail">
 			<div class="mm-sec">
 				<div class="mm-sec__head">${esc(t("modules.title", { turn: selectedTurn.label }))}<span class="mm-sec__count">${esc(t("turn.nodes", { n: 5 }))}</span></div>
-				<pre class="mm-quote">对比度不是靠色相拉开的：把卡片描边从 --mm-line 提到 --mm-line-strong，正文保持主文字色，标签用次级文字色，就够 4.5:1。深色主题下 --mm-fill 要跟着背景层走，别写死。</pre>
+				<pre class="mm-quote">${esc(selectedTurn.answerText)}</pre>
 ${rows}
 			</div>
 		</aside>

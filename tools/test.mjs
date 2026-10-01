@@ -291,6 +291,54 @@ mutation(
 );
 
 mutation(
+	"drop the context signal (the follow-up that reuses the reply's words goes back to being a new branch)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\t\t\t\tconst byContext = contextCandidates(index, profiles, contexts)[0];\n\t\t\t\t\t\tif (byContext !== undefined && byContext.score >= LINK_CONTEXT_MIN_SCORE) {",
+			"\t\t\t\t\t\tconst byContext = contextCandidates(index, profiles, contexts)[0];\n\t\t\t\t\t\tif (false && byContext !== undefined && byContext.score >= LINK_CONTEXT_MIN_SCORE) {"
+		)
+	}),
+	"behaviour.mjs"
+);
+
+mutation(
+	"open the context gate all the way (a reply that merely mentions a term starts linking)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\tconst LINK_CONTEXT_MIN_SCORE = 0.65;",
+			"\t\tconst LINK_CONTEXT_MIN_SCORE = 0;"
+		)
+	}),
+	"behaviour.mjs"
+);
+
+mutation(
+	"let the context signal outrank a question match instead of only filling in for it",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\t\t\tconst best = candidates[index][0];\n\t\t\t\t\tif (best !== undefined && best.score >= LINK_MIN_SCORE) {",
+			"\t\t\t\t\tconst best = candidates[index][0];\n\t\t\t\t\tif (false && best !== undefined && best.score >= LINK_MIN_SCORE) {"
+		)
+	}),
+	"behaviour.mjs"
+);
+
+mutation(
+	"build the context vector from the replies instead of the questions (one long reply redefines the background)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\tconst questionDocuments = turns.map((turn) => new Set(termsOf(turn.promptText.length > 0 ? turn.promptText : turn.text)));\n\t\t\tconst documentFrequency = new Map();\n\t\t\tfor (const document of questionDocuments) {",
+			"\t\t\tconst questionDocuments = turns.map((turn) => new Set(termsOf(contextTextOf(turn))));\n\t\t\tconst documentFrequency = new Map();\n\t\t\tfor (const document of questionDocuments) {"
+		)
+	}),
+	"behaviour.mjs"
+);
+
+mutation(
 	"let the depth limit fold the title node itself (the whole map collapsed into one card)",
 	(files) => ({
 		...files,

@@ -1,7 +1,7 @@
 {
   "name": "@nydsg/dsh-mindmap",
-  "version": "1.1.0",
-  "description": "DSH conversation mind map: one horizontal hierarchy that starts at a single left-hand title node (the first question) and opens rightwards — every turn is a card showing only your question, auto-linked to the earlier question it continues. Flat 1px outlines and square corners, no shadows, no gradients. Click a card for the reply, tool calls, keyword weights, and suggested follow-ups. 中文：把 DSH 对话轨迹渲染成一张从左到右的横向层级树，左侧唯一的起始总标题节点（= 第 1 轮提问）向右逐层展开，扁平化简约风格；按提问相似度自动续接分支，可手动改父节点；本地分析，零网络。",
+  "version": "1.2.0",
+  "description": "DSH conversation mind map: one horizontal hierarchy that starts at a single left-hand title node (the first question) and opens rightwards — every turn is a card showing only your question, linked to the earlier turn it continues by wording OR by what that turn was already discussing. Flat 1px outlines and square corners, no shadows, no gradients. Click a card for the reply, tool calls, keyword weights, and suggested follow-ups. 中文：把 DSH 对话轨迹渲染成一张从左到右的横向层级树，左侧唯一的起始总标题节点（= 第 1 轮提问）向右逐层展开，扁平化简约风格；按提问词面或上一轮已聊到的内容自动续接分支，可手动改父节点；本地分析，零网络。",
   "keywords": [
     "dsh",
     "dsh-plugin",

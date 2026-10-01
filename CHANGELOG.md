@@ -4,6 +4,53 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — the next question can link on context, not only on wording
+
+### Added
+
+- **Context links.** A new turn can now attach to an earlier turn because that turn
+  was already discussing what the new question asks about — its reply and its tool
+  calls, not just its question. This is the case the plugin used to get wrong: a
+  follow-up like "`--mm-line-strong` 在小字上够 4.5:1 吗" shares no wording with any
+  question (the flag was introduced by a *reply*), so it used to start its own
+  branch. It now links, labelled `语境续接` / `context 0.75` instead of being
+  silently reported as a wording match.
+- **`tools/context-experiment.mjs`** — the labelled-case harness that decided the
+  new gate, kept in the repo so the number can be re-derived rather than trusted.
+  It prints both scores, the winner under each, and a gate sweep.
+
+### Changed
+
+- **Two signals, a strict division of labour — not a blend.** The question signal
+  decides whenever it can, because it is the one measured to separate cleanly at
+  the question level. The context signal is consulted **only when the question
+  signal is silent**. Adding them was rejected: the two scores answer different
+  questions ("did this continue that question" vs "was this already discussed in
+  that turn"), so a long reply would otherwise outvote an explicit question match.
+- **The context gate (`0.65`) comes from a measured gap.** A genuine context
+  continuation scores 0.75–0.78; the case that must be refused — a reply that
+  merely *names* a term the next question asks about — reaches 0.50. The sweep
+  shows 0.50–0.75 score identically on the current cases and 0.80 starts losing
+  real links, so 0.65 is the midpoint of the gap rather than a fitted value.
+- **Document frequency still counts QUESTIONS, never replies.** A term that also
+  appears in some reply is not demoted for it; otherwise one chatty answer would
+  redefine the session's background and reweight every other score. This is
+  asserted directly, because no end-to-end case pins it.
+
+### Fixed
+
+- **The matcher threw on a turn with no module list.** `contextTextOf` called
+  `turn.modules.filter`, which breaks any caller whose turns carry only text — the
+  gates' own fixtures, and any projection that grows or loses a field. It now
+  degrades to "no context from here", the same tolerance the rest of the plugin
+  applies to projection data.
+
+### Notes
+
+- Both signals stay local: no network, no model calls. A lexical engine still
+  cannot detect a paraphrase that shares **no** vocabulary at all ("怎么装插件" vs
+  "插件如何安装"); that is unchanged and still needs a manual pin.
+
 ## [1.1.0] — one hierarchy entered from the left, and a flat surface
 
 ### Added

@@ -45,7 +45,7 @@ ${region("lib/client/branching.js")}
 ${region("lib/client/chat-data.js")}
 ${region("lib/client/layout.js")}
 ${region("lib/client/outline.js")}
-return { segmentText, keywordsOf, termProfile, analyzeBackward, suggestQuestions, buildModel, outlineText, kindKey, STOPWORDS, cosineSimilarity, signalOverlap, questionProfiles, resolveLinks, overridesToRecord, overridesFromRecord, layoutTree, placeTree, edgePath };
+return { segmentText, keywordsOf, termProfile, analyzeBackward, suggestQuestions, buildModel, outlineText, kindKey, STOPWORDS, cosineSimilarity, signalOverlap, questionProfiles, resolveLinks, overridesToRecord, overridesFromRecord, contextTextOf, contextVectors, contextResonance, contextCandidates, LINK_MIN_SCORE, LINK_CONTEXT_MIN_SCORE, layoutTree, placeTree, edgePath };
 `;
 
 /** A few stopwords that must never survive segmentation, sampled from the engine's own list. */
@@ -330,6 +330,148 @@ eq(empty.total, 0, "an absent snapshot must report zero modules");
 	// bundle runs in a VM realm, so its Map is a different `Map` than this file's.
 	ok(built.branch !== undefined && typeof built.branch.nodes?.get === "function", "buildModel must expose the resolved branch forest");
 	ok(Array.isArray(built.branch.roots), "the branch forest must expose its roots");
+}
+
+/*
+ * The CONTEXT signal.
+ *
+ * The plugin could only ever compare a question against earlier QUESTIONS, which
+ * meant a follow-up that reused the reply's vocabulary — "--mm-line-strong 在小字
+ * 上够 4.5:1 吗" after a reply that said "--mm-line-strong" — started a new branch
+ * even though the thread was obvious to a reader.
+ *
+ * The property that has to hold is a SEPARATION, not a single result: a genuine
+ * context continuation must score above the gate, and a reply that merely NAMES a
+ * term the next question asks about must stay below it. Asserting only "the
+ * follow-up links" would stay green under a gate lowered to zero, which is exactly
+ * the mistake the README's last trap describes.
+ */
+{
+	/** Build a turn model with the context fields the matcher reads. */
+	const turn = (id, prompt, answer, tools = []) => ({
+		id,
+		number: Number(id.split(":")[1]),
+		promptText: prompt,
+		answerText: answer,
+		text: `${prompt}\n${answer}`,
+		modules: tools.map((title, i) => ({ kind: "tool", title, seq: i }))
+	});
+
+	// The reply introduces a term no question uses; the follow-up asks about it.
+	const contextCase = [
+		turn("turn:1", "我在调 DSH 插件的深色主题", "深色主题要改令牌层，别改组件里的颜色。"),
+		turn("turn:2", "那卡片描边的对比度要调到多少", "正文按 4.5:1，12px 的小字也要 4.5:1。描边可以用 --mm-line-strong，视觉上更清楚。"),
+		turn("turn:3", "--mm-line-strong 在小字上够 4.5:1 吗", "描边不是文字，不适用那个门槛。")
+	];
+	const contextForest = api.resolveLinks(contextCase, new Map());
+	const contextNode = contextForest.nodes.get("turn:3");
+	eq(contextNode.parent, "turn:2", "a follow-up that reuses the reply's vocabulary must link to that turn");
+	eq(contextNode.link.kind, "context", "a link made on context must say so, not be reported as a wording match");
+	ok(contextNode.link.score >= api.LINK_CONTEXT_MIN_SCORE, `a context link must clear the gate, got ${contextNode.link.score}`);
+
+	// The same conversation, with the reply's vocabulary removed: the follow-up now
+	// shares nothing and must start its own branch. This is what proves the link
+	// above came from the CONTEXT and not from some background overlap.
+	const withoutContext = contextCase.map((entry, index) => (index === 1 ? { ...entry, answerText: "已处理。" } : entry));
+	eq(api.resolveLinks(withoutContext, new Map()).nodes.get("turn:3").parent, null, "without the reply's vocabulary the same question must start a new branch");
+
+	// The refusal case. A reply that mentions the term in passing — while the thread
+	// is plainly something else — must NOT link, and its score is the upper bound the
+	// gate has to stay above.
+	const passingMention = [
+		turn("turn:1", "帮我看看这个报错栈", "这是权限问题。顺带一提，重新打包不会影响 profile 的锁定文件。"),
+		turn("turn:2", "profile 的锁定文件要不要一起提交", "要。")
+	];
+	const mentionForest = api.resolveLinks(passingMention, new Map());
+	eq(mentionForest.nodes.get("turn:2").parent, null, "a mere passing mention in the reply must not create a link");
+
+	const mentionScore = api.contextResonance(
+		api.questionProfiles(passingMention)[1],
+		api.contextVectors(passingMention)[0]
+	);
+	const genuineScore = api.contextResonance(
+		api.questionProfiles(contextCase)[2],
+		api.contextVectors(contextCase)[1]
+	);
+	ok(
+		mentionScore < api.LINK_CONTEXT_MIN_SCORE && genuineScore >= api.LINK_CONTEXT_MIN_SCORE,
+		`the gate must separate a passing mention from a genuine continuation, got ${mentionScore} vs ${genuineScore}`
+	);
+	ok(
+		genuineScore - mentionScore > 0.2,
+		`the two classes must be far apart, not merely on either side of the gate: got ${mentionScore} vs ${genuineScore}`
+	);
+
+	// A context link is a SECOND chance, never a competitor: an explicit question
+	// match must still win even when the context score is also above the gate.
+	const bothSignals = [
+		turn("turn:1", "我要给 DSH 写一个插件", "先搭目录结构。"),
+		turn("turn:2", "这个 DSH 插件怎么做思维导图视图", "注册 conversation.view 页签，然后用思维导图视图布局。"),
+		turn("turn:3", "思维导图视图的分支连线怎么画", "用思维导图视图的算术坐标，别量 DOM。")
+	];
+	const bothForest = api.resolveLinks(bothSignals, new Map());
+	eq(bothForest.nodes.get("turn:3").link.kind, "auto", "a question match must win over a context match when both are available");
+
+	// Manually pinning still beats both signals.
+	const pinnedForest = api.resolveLinks(bothSignals, new Map([["turn:3", null]]));
+	eq(pinnedForest.nodes.get("turn:3").parent, null, "a manual pin must suppress the context signal too");
+	eq(pinnedForest.nodes.get("turn:3").link.kind, "manual", "a pinned turn must stay labelled manual");
+
+	// A missing module list or answer must degrade to "no context", never throw.
+	const sparse = api.resolveLinks([{ id: "turn:1", number: 1, promptText: "第一轮问题", text: "第一轮问题" }], new Map());
+	eq(sparse.nodes.get("turn:1").parent, null, "a turn with no modules and no reply must resolve without throwing");
+	eq(api.contextTextOf({ id: "turn:9", promptText: "只", text: "只" }), "只", "contextTextOf must tolerate a missing module list");
+	eq(api.contextResonance(undefined, undefined), 0, "contextResonance must tolerate missing profiles");
+
+	/*
+	 * WHICH TEXT DEFINES "BACKGROUND" is the load-bearing decision in the context
+	 * vector, and it cannot be pinned end-to-end: an end-to-end case only moves when
+	 * a term's weight CHANGE flips a winner, which needs a term that is signal in the
+	 * new question while also appearing in several answers. So the property is
+	 * asserted directly.
+	 *
+	 * The property: document frequency counts QUESTIONS. A term that also shows up in
+	 * another turn's REPLY must not be demoted for it — otherwise one chatty answer
+	 * silently redefines the session's background and reweights every other score.
+	 */
+	{
+		// Latin probe terms on purpose: the segmenter keeps a Latin run as ONE token,
+		// while a Chinese word with no dictionary entry is split into single
+		// characters (a documented limit). The probe must not depend on that.
+		//
+		// Both terms occur exactly ONCE in the context text of the turn that carries
+		// them, so the only thing that differs between them is WHICH turn's reply
+		// mentioned them — that is the variable under test. (A probe term that also
+		// appeared in its own turn's prompt would score higher through the term-count
+		// factor and prove nothing about document frequency.)
+		const alpha = "alphaterm";
+		const beta = "betaterm";
+		const filler = "fillermterm";
+		const probe = [
+			{ id: "turn:1", number: 1, promptText: `第一问 ${filler}`, answerText: `${alpha} 的解释`, text: "", modules: [] },
+			{ id: "turn:2", number: 2, promptText: "第二问", answerText: `${alpha} 又提`, text: "", modules: [] },
+			{ id: "turn:3", number: 3, promptText: "第三问", answerText: `${beta} 只在`, text: "", modules: [] }
+		];
+		const vectors = api.contextVectors(probe);
+		const weightAlpha = vectors[0].get(alpha);
+		const weightBeta = vectors[2].get(beta);
+		ok(weightAlpha !== undefined && weightBeta !== undefined, "both probe terms must survive into the context vectors");
+		ok(
+			Math.abs(weightAlpha - weightBeta) < 1e-9,
+			`a term's weight must come from its QUESTION frequency and how often it occurs, not from which turn's reply said it: ${alpha}=${weightAlpha} ${beta}=${weightBeta}`
+		);
+		// And the question-level frequency must still bite: a term used by two
+		// questions is background compared with one used by a single question.
+		const demoted = api.contextVectors([
+			{ id: "turn:1", number: 1, promptText: `共同 ${alpha}`, answerText: "甲", text: "", modules: [] },
+			{ id: "turn:2", number: 2, promptText: `共同 ${alpha}`, answerText: "乙", text: "", modules: [] },
+			{ id: "turn:3", number: 3, promptText: "独有", answerText: `${beta} 的说明`, text: "", modules: [] }
+		]);
+		ok(
+			(demoted[2].get(beta) ?? 0) > (demoted[0].get(alpha) ?? 0),
+			"a term two questions share is background and must weigh less than one only a single question names"
+		);
+	}
 }
 
 // ── horizontal layout geometry ────────────────────────────────────────────

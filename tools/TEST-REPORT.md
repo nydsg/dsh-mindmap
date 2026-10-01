@@ -28,7 +28,7 @@ check: PASS (0 problems)
 behaviour: PASS (0 problems)
 
 note: bundle: D:\Codex-workspace\dsh-mindmap\lib\client.js
-note: locale keys: 93 zh / 93 en; view-referenced: 78
+note: locale keys: 95 zh / 95 en; view-referenced: 80
 registration: PASS (0 problems)
 ```
 
@@ -165,6 +165,43 @@ result: 5 turns → 5 branch root(s), 2 column(s), 5 connector(s), canvas 640×4
    column occupancy: col0=1  col1=5
 
 ──────────────────────────────────────────────────────────────────────────
+F. The follow-up names what the reply introduced
+──────────────────────────────────────────────────────────────────────────
+why: No shared wording with any question, but #3 asks about a term only #2's reply introduced. It must link to #2 as a CONTEXT link.
+result: 3 turns → 2 branch root(s), 3 column(s), 3 connector(s), canvas 964×190px
+
+   #1 [root] col1
+      我在调 DSH 插件的深色主题
+   #2 [root] col1
+      那卡片描边的对比度要调到多少
+      └─ #3 [context 0.75] col2
+         --mm-line-strong 在小字上够 4.5:1 吗
+
+   connectors (parent right edge → child left edge):
+     #__title__ → #1   (280,95) → (360,50)   [root]
+     #2 → #3   (628,140) → (684,140)   [context]
+     #__title__ → #2   (280,95) → (360,140)   [root]
+
+   column occupancy: col0=1  col1=2  col2=1
+
+──────────────────────────────────────────────────────────────────────────
+G. A passing mention is not a thread
+──────────────────────────────────────────────────────────────────────────
+why: The reply mentions the next question's subject in passing while the thread is something else. #2 must stay a branch root.
+result: 2 turns → 2 branch root(s), 2 column(s), 2 connector(s), canvas 640×190px
+
+   #1 [root] col1
+      帮我看看这个报错栈
+   #2 [root] col1
+      profile 的锁定文件要不要一起提交
+
+   connectors (parent right edge → child left edge):
+     #__title__ → #1   (280,95) → (360,50)   [root]
+     #__title__ → #2   (280,95) → (360,140)   [root]
+
+   column occupancy: col0=1  col1=2
+
+──────────────────────────────────────────────────────────────────────────
 F. Segmentation / keyword engine (the inputs to matching)
 ──────────────────────────────────────────────────────────────────────────
    text : 插件安装到 dsh 的 web profile 需要重启吗
@@ -193,7 +230,7 @@ F. Segmentation / keyword engine (the inputs to matching)
 
   PASS  registration.mjs
         note: bundle: D:\Codex-workspace\dsh-mindmap\lib\client.js
-        note: locale keys: 93 zh / 93 en; view-referenced: 78
+        note: locale keys: 95 zh / 95 en; view-referenced: 80
         registration: PASS (0 problems)
 
 ══════════════════════════════════════════════════════════════════════════
@@ -267,6 +304,7 @@ F. Segmentation / keyword engine (the inputs to matching)
        expected behaviour.mjs to FAIL → it failed
          - a pinned root must be labelled manual, not mistaken for an unmatched turn
          - a pinned link must be labelled manual
+         - a pinned turn must stay labelled manual: got "root", expected "manual"
        other gates: check.mjs:pass  registration.mjs:pass
 
   ✓  assign rows by a pre-order walk instead of centering a parent on its children
@@ -286,6 +324,32 @@ F. Segmentation / keyword engine (the inputs to matching)
        expected behaviour.mjs to FAIL → it failed
          - background-only overlap must fall under the threshold, got 0.511
          - similarity must be a fraction
+       other gates: check.mjs:pass  registration.mjs:pass
+
+  ✓  drop the context signal (the follow-up that reuses the reply's words goes back to being a new branch)
+       expected behaviour.mjs to FAIL → it failed
+         - a follow-up that reuses the reply's vocabulary must link to that turn: got null, expected "turn:2"
+         - a link made on context must say so, not be reported as a wording match: got "root", expected "context"
+         - a context link must clear the gate, got 0
+       other gates: check.mjs:pass  registration.mjs:pass
+
+  ✓  open the context gate all the way (a reply that merely mentions a term starts linking)
+       expected behaviour.mjs to FAIL → it failed
+         - a mere passing mention in the reply must not create a link: got "turn:1", expected null
+         - the gate must separate a passing mention from a genuine continuation, got 0.5 vs 0.75
+       other gates: check.mjs:pass  registration.mjs:pass
+
+  ✓  let the context signal outrank a question match instead of only filling in for it
+       expected behaviour.mjs to FAIL → it failed
+         - turn 2 is about the same install topic and should continue turn 1, got null
+         - turn 4 revisits the install topic and should join that branch, got null
+         - a linked turn's parent must exist in the forest
+         - expected 2 branch roots, got 4
+       other gates: check.mjs:pass  registration.mjs:pass
+
+  ✓  build the context vector from the replies instead of the questions (one long reply redefines the background)
+       expected behaviour.mjs to FAIL → it failed
+         - a term's weight must come from its QUESTION frequency and how often it occurs, not from which turn's reply said it: alphaterm=0.6931471805599453 betaterm=0.9162907318741551
        other gates: check.mjs:pass  registration.mjs:pass
 
   ✓  let the depth limit fold the title node itself (the whole map collapsed into one card)
@@ -318,7 +382,7 @@ F. Segmentation / keyword engine (the inputs to matching)
 ══════════════════════════════════════════════════════════════════════════
 SUMMARY
 ══════════════════════════════════════════════════════════════════════════
-  13 passed, 0 failed
+  17 passed, 0 failed
 
 test: PASS (all gates green, all mutations caught)
 ```

@@ -38,6 +38,7 @@ list (once listed).
 | Horizontal hierarchy | Column = depth, row = arrangement. A parent connects to its children with an orthogonal elbow. Card positions are **computed**, never measured from the DOM |
 | Single entry point | Every branch root hangs off the title, so the map has exactly **one** starting point. `N first branches` at the bottom of the title says how many |
 | Automatic branching | Each question is matched against every earlier question; above the threshold it continues the best one, otherwise it starts a new branch (scoring below) |
+| Context links | When the wording does not match, the plugin asks what that turn was already **discussing** — its reply and its tool calls. If this turn asks about something already on the table there, it links, labelled `context {score}`. Local lexical analysis, not a model call |
 | Cards show only questions | Number + branch badge + question text (up to 4 lines) + module count. Replies are not on the card |
 | Manual branch control | Pin a card under any earlier turn, force it to a new branch, or hand it back to the matcher; one click clears every manual link |
 | Similarity candidates | The panel lists the 5 closest earlier questions with their scores — click one to attach under it |
@@ -51,9 +52,34 @@ list (once listed).
 
 ## How a branch is decided
 
-Every question has two kinds of words: **background words** shared by the whole session (product names, "how", file names) and **signal words** belonging to only a few questions (appearing ≤2 times in the session, or above that question's own median IDF). **Score = shared signal weight ÷ the smaller side's signal weight**, threshold `0.40`. Below it, the turn starts a new branch.
+Two signals, in a **strict division of labour — not a weighted blend**.
+
+### Step 1: question wording (the primary signal, threshold `0.40`)
+
+Every question has two kinds of words: **background words** shared by the whole session (product names, "how", file names) and **signal words** belonging to only a few questions (appearing ≤2 times in the session, or above that question's own median IDF). **Score = shared signal weight ÷ the smaller side's signal weight**. At or above `0.40`, the turn continues the best match; below it, the decision moves to step 2.
 
 Why not cosine: measured on real cases (see [`tools/TEST-REPORT.md`](tools/TEST-REPORT.md)), true links score 0.29–0.72 in cosine while **background-only** false matches score 0.16–0.20 — **no cosine threshold separates them**. With the signal ratio, true links land at 0.44–1.00 and false matches at ≤0.28, a clean gap, and the threshold comes straight out of that table.
+
+### Step 2: context resonance (the fallback signal, threshold `0.65`)
+
+**Consulted only when step 1 is silent.** It asks what that turn was already **talking about** — its question, its reply, and its tool calls:
+
+```
+resonance = weight of this question's SIGNAL terms that appear in that turn's context
+            ÷ total signal weight of this question
+```
+
+The shape of that ratio is the whole design, and all three parts matter:
+
+- the numerator counts only terms that are **signal in the new question**, weighted by the session IDF. A word the whole session uses contributes almost nothing, so the session's background cannot connect everything;
+- the denominator is that question's **own** signal weight, so the score answers "what share of what I am asking about was already discussed in that turn" — not "how long was that reply";
+- a term that appears in the reply but **not in the question** is invisible here. That is what stops a long reply from linking to everything: a reply can only raise a score by covering terms the question actually asked with.
+
+Measured with [`tools/context-experiment.mjs`](tools/context-experiment.mjs): a genuine context continuation scores **0.75–0.78**, while the case that must be refused — a reply that merely **names** a term the next question asks about while the thread is plainly something else — reaches **0.50**. The gate sweep scores identically from 0.50 to 0.75 and starts losing real links at 0.80, so `0.65` is the midpoint of that gap rather than a fitted value.
+
+One constraint is not negotiable: **document frequency counts QUESTIONS, never replies.** Otherwise one chatty answer would redefine the session's background and reweight every other score. No end-to-end case pins that property, so a gate asserts it directly.
+
+> Why not add the two scores: they answer **different questions** ("did this continue that question" vs "was this already discussed in that turn"). Adding them would let a long reply outvote an explicit question match — so step 2 only speaks when step 1 has nothing to say.
 
 The automatic result is a **guess**, so any turn can be changed by hand, and a changed turn is never re-derived. A parent must be a **strictly earlier** turn; the code enforces that invariant, because otherwise the tree would contain a cycle and the renderer would recurse forever.
 
@@ -118,6 +144,7 @@ node tools/behaviour.mjs     # segmentation, keywords, branch scoring, layout ge
 node tools/registration.mjs  # apply()/inject() contract + structural invariants
 node tools/verify-pack.mjs   # pre-publish: manifest identity, required files, no developer-machine absolute paths
 node tools/screenshot.mjs    # regenerates docs/screenshot.png (needs Edge or Chrome)
+node tools/context-experiment.mjs  # score table and gate sweep for the context signal (a measuring bench, not a gate)
 ```
 
 Everything is offline and deterministic, with no dependencies (only the screenshot
@@ -186,7 +213,10 @@ The more expensive lesson: the first `registration.mjs` used `inject()`'s return
 - **The match score is not a cosine**; it is the shared-signal ratio over the smaller side (rules and measurements above).
 - **Keyword threshold**: only words appearing ≥2 times in the session enter the keyword ranking; a word seen once appears only under "new topics".
 - **Candidate questions are template-assembled**, not semantically generated. Genuinely understanding what the previous turn was about would need an LLM; this version deliberately calls no model, to stay instant and offline.
-- **Paraphrases do not connect** ("how to install a plugin" vs "how is a plugin installed"): this is lexical matching, not semantic understanding, and zero shared signal words means a new branch. Manual attachment exists for exactly this case. The `0.40` threshold and the `12`-turn lookback are now **derived from the case data** (see the score table in `TEST-REPORT.md`), but they still only cover the conversation shapes I constructed.
+- **Paraphrases may still not connect** ("how to install a plugin" vs "how is a plugin installed"): both steps are **lexical**. The context signal rescues the case where a follow-up reuses words from the earlier **reply**, but a paraphrase that shares **no** vocabulary still becomes a new branch — in the example above, `装` and `安装` are different tokens. Manual attachment exists for exactly this. The `0.40` / `0.65` thresholds and the `12`-turn lookback are **derived from the case data** (the score table in `TEST-REPORT.md`, and the gate sweep in `tools/context-experiment.mjs`), but they still only cover the conversation shapes I constructed.
+- **The context signal needs a reply to exist**: a turn that is still streaming has no reply text, so its context text falls back to its question (which the question signal already covers).
+- **Chinese segmentation dilutes the context signal**: function words become signal terms too. Measured: `描边在小字上要满足 4.5:1 吗` segments to `描边|小字|上要|满足|4.5`, and because `上要` and `满足` are functional and absent from any reply, the denominator holds five terms while only three can match — resonance drops to `0.60`, just under the `0.65` gate. The signal is therefore sharpest on **short** questions and thinned by wordy ones. That is the inherent cost of a lexical method, not a mis-set threshold.
+- **An exact tie is broken by recency, not by meaning**: the metric really does produce **identical** scores. Measured case: `#5` scores exactly `0.5642` against both `#1` and `#2`, because it shares the same set of words with each (`dsh/插件/安装/profile`) while their distinguishing words (`web`/`重启` vs `失败`/`排查`) do not match `#5`'s `要重` — the metric has **no information** with which to separate them, so the nearer turn wins. That is not a bug but the honest limit of a lexical metric, and it is why any turn can be re-linked by hand.
 - **Very short follow-ups may not connect**: a question like "continue" has one or two generic words and little or no signal, so it becomes a new branch. Changing the parent by hand solves it.
 - **Branches proceed linearly by turn**: a new turn can only attach under an **earlier** turn, so no back-reference (a later question becoming the parent of an earlier one) can appear.
 - **There is exactly one title, and it always uses the first question**: no second entry node and no "change the title" UI. If the first turn has no prompt text, the title shows "(no prompt text in this turn)".

@@ -39,7 +39,14 @@ const api = vm.runInContext(
 	{ filename: "showcase-regions.js" }
 );
 
-const turn = (number, prompt) => ({ id: `turn:${number}`, number, promptText: prompt, text: prompt });
+const turn = (number, prompt, answer = "") => ({
+	id: `turn:${number}`,
+	number,
+	promptText: prompt,
+	answerText: answer,
+	text: [prompt, answer].filter((part) => part.length > 0).join("\n"),
+	modules: []
+});
 
 const CASES = [
 	{
@@ -94,6 +101,28 @@ const CASES = [
 			turn(3, "推荐一部科幻电影"),
 			turn(4, "怎么练习长跑"),
 			turn(5, "咖啡因每天摄入上限是多少")
+		]
+	},
+	{
+		// The case the context signal exists for. #3's question shares no signal
+		// vocabulary with #2's QUESTION — "--mm-line-strong" was introduced by #2's
+		// REPLY — so the wording matcher alone calls it a new branch.
+		title: "F. The follow-up names what the reply introduced",
+		why: "No shared wording with any question, but #3 asks about a term only #2's reply introduced. It must link to #2 as a CONTEXT link.",
+		turns: [
+			turn(1, "我在调 DSH 插件的深色主题", "深色主题要改令牌层，别改组件里的颜色。"),
+			turn(2, "那卡片描边的对比度要调到多少", "正文按 4.5:1，12px 的小字也要 4.5:1。描边可以用 --mm-line-strong，视觉上更清楚。"),
+			turn(3, "--mm-line-strong 在小字上够 4.5:1 吗", "描边不是文字，不适用那个门槛。")
+		]
+	},
+	{
+		// The refusal the context gate has to make. A reply that merely NAMES the
+		// term in passing must not pull the next question under it.
+		title: "G. A passing mention is not a thread",
+		why: "The reply mentions the next question's subject in passing while the thread is something else. #2 must stay a branch root.",
+		turns: [
+			turn(1, "帮我看看这个报错栈", "这是权限问题。顺带一提，重新打包不会影响 profile 的锁定文件。"),
+			turn(2, "profile 的锁定文件要不要一起提交", "要。")
 		]
 	}
 ];
