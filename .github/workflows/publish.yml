@@ -3,12 +3,11 @@
 # gates again here, so a red gate aborts the upload before anything leaves the
 # machine.
 #
-# The version goes to the staging area, not straight to the registry: npm no
-# longer issues tokens that bypass 2FA, and trusted publishing needs the package
-# to already exist, so a brand-new name can only be claimed with
-# `npm stage publish` plus a maintainer approving it on npmjs.com. Staging needs
-# no 2FA; the approval does. Once the name exists, configure a trusted publisher
-# and the same step keeps working through OIDC.
+# Publishing runs through trusted publishing (OIDC): npm checks that the job
+# belongs to `nydsg/dsh-mindmap`'s publish.yml and mints a short-lived
+# credential, so no token and no interactive 2FA are involved. The name had to
+# be claimed with one staged publish first, because trusted publishing needs the
+# package to already exist.
 name: publish
 
 on:
@@ -36,28 +35,25 @@ jobs:
           # runner's .npmrc, so the token fallback below is already wired up.
           registry-url: https://registry.npmjs.org
 
-      # Node 22 ships npm 10.x, and staged publishing needs 11.15.0 or later.
+      # Node 22 ships npm 10.x, and trusted publishing needs 11.5.1 or later.
       # Staying on the 11.x line avoids npm 12, which wants a newer Node than
       # the 22.x releases always provide.
-      - name: npm 11 for staged publishing
+      - name: npm 11 for trusted publishing
         run: npm install --global npm@^11.15.0
 
       # --access public is required for a scope package, and the explicit
       # registry keeps a stray mirror setting from silently swallowing the upload.
-      # Staging the first version also claims the name, by publishing a
-      # placeholder that shows up as 0.0.0-stage.
-      - name: stage the version
+      # --access public is required for a scope package, and the explicit
+      # registry keeps a stray mirror setting from silently swallowing the upload.
+      - name: publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm stage publish --registry=https://registry.npmjs.org/ --access public
+        run: npm publish --registry=https://registry.npmjs.org/ --access public
 
-      - name: show what to approve
+      - name: verify the version is live
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
-          live=$(npm view "$name" dist-tags.latest --registry=https://registry.npmjs.org/ 2>/dev/null || echo "<name not claimed yet>")
-          echo "staged: $name@$version"
-          echo "live:   $live"
-          echo "approve: https://www.npmjs.com/package/$name"
+          npm view "$name@$version" version --registry=https://registry.npmjs.org/
