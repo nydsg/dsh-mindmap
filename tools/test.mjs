@@ -25,7 +25,7 @@ import { rewriteScalar } from "./yaml.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const NODE = process.execPath;
-const GATES = ["check.mjs", "behaviour.mjs", "registration.mjs"];
+const GATES = ["check.mjs", "behaviour.mjs", "registration.mjs", "layering.mjs", "host.mjs"];
 
 const pass = [];
 const fail = [];
@@ -247,8 +247,8 @@ mutation(
 	(files) => ({
 		...files,
 		"lib/client.js": files["lib/client.js"].replace(
-			"\t\t\t\t\tkind = \"manual\";\n\t\t\t\t} else {",
-			"\t\t\t\t\tkind = \"root\";\n\t\t\t\t} else {"
+			"\t\t\t\t\tkind = \"manual\";\n\t\t\t\t} else if (judged !== undefined) {",
+			"\t\t\t\t\tkind = \"root\";\n\t\t\t\t} else if (judged !== undefined) {"
 		)
 	}),
 	"behaviour.mjs"
@@ -305,11 +305,27 @@ mutation(
 // because the suite cannot refute it and a mutation case that is already green
 // proves nothing. Dropping LINK_MIN_SCORE only changes a decision when a candidate
 // scores strictly between 0 and the threshold, and no fixture produces such a
-// candidate — they either score 0 (the chain decides) or clear 0.4 (the wording
-// match decides). Adding a low-scoring fixture until the mutation turns red would
-// be writing the test to fit the claim. The wording SCORE's discriminating property
-// is covered by the raw-cosine mutation above instead, which asserts the separation
-// between a real match and a background-only pair.
+// candidate — they either score 0 (the chain decides) or clear the threshold (the
+// wording match decides). Adding a low-scoring fixture until the mutation turns red
+// would be writing the test to fit the claim. The wording SCORE's discriminating
+// property is covered by the raw-cosine mutation above instead, which asserts the
+// separation between a real match and a background-only pair.
+//
+// The threshold's VALUE is a different matter: 0.50 is a decided policy (tightened
+// from the measured midpoint 0.40 so that a 回溯 claim is harder to earn), and
+// behaviour.mjs pins it directly — so loosening it IS refutable, and this case proves it.
+mutation(
+	"loosen the deliberately tightened shared-signal threshold back to the gap midpoint",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\tconst LINK_MIN_SCORE = 0.5;",
+			"\t\tconst LINK_MIN_SCORE = 0.4;"
+		)
+	}),
+	"behaviour.mjs"
+);
+
 mutation(
 	"chain a turn to itself instead of the previous turn (the first turn must stay a root)",
 	(files) => ({
@@ -391,6 +407,95 @@ mutation(
 		"cordis.patch.yml": `${files["cordis.patch.yml"]}\n- insert:\n    - id: '@nydsg/dsh-mindmap'\n      name: '@nydsg/dsh-mindmap'\n`
 	}),
 	"check.mjs"
+);
+
+// ── the layering protocol (the requirement document's own rules) ──────────
+//
+// These cases break properties the document states outright, so each one is a
+// regression against the SPEC rather than against a historical incident.
+
+mutation(
+	"drop the documented level cap (the map marches off to the right again)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\t\tif (parent !== null && !isManual && maxDepth > 0) {",
+			"\t\t\t\tif (false) {"
+		)
+	}),
+	"behaviour.mjs"
+);
+
+mutation(
+	"render a fragment without its operation marker (the 操作标注 the document requires)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\tconst lines = tag.length > 0 ? [tag] : [];",
+			"\t\t\tconst lines = [];"
+		)
+	}),
+	"layering.mjs"
+);
+
+mutation(
+	"read every model fragment as 父类下推 (the operation marker stops meaning anything)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\t\t\tat = index;\n\t\t\t\t\toperation = id;",
+			"\t\t\t\t\tat = index;\n\t\t\t\t\toperation = \"push\";"
+		)
+	}),
+	"layering.mjs"
+);
+
+mutation(
+	"ignore a seeded model judgment (the model path stops shaping the tree)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\t\tconst judged = !isManual && usableSeed(judgment, index) ? judgment : undefined;",
+			"\t\t\t\tconst judged = undefined;"
+		)
+	}),
+	"layering.mjs"
+);
+
+mutation(
+	"let a seeded judgment name a later turn as its parent (the acyclicity guard)",
+	(files) => ({
+		...files,
+		"lib/client.js": files["lib/client.js"].replace(
+			"\t\t\t\treturn at !== undefined && at < index;",
+			"\t\t\t\treturn at !== undefined;"
+		)
+	}),
+	"layering.mjs"
+);
+
+mutation(
+	"report a failed model call as an empty success (the reply that never happened)",
+	(files) => ({
+		...files,
+		"lib/index.js": files["lib/index.js"].replace(
+			"\t\tif (reason.kind === \"error\" || reason.kind === \"aborted\") {",
+			"\t\tif (false) {"
+		)
+	}),
+	"host.mjs"
+);
+
+mutation(
+	"keep paying for a model call the page abandoned (no cancellation)",
+	(files) => ({
+		...files,
+		"lib/index.js": files["lib/index.js"].replace(
+			"\tres.on(\"close\", () => controller.abort());",
+			"\tvoid controller;"
+		)
+	}),
+	"host.mjs"
 );
 
 // ── 4. report ─────────────────────────────────────────────────────────────

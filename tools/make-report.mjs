@@ -25,7 +25,7 @@ function run(script) {
 
 const showcase = run("showcase.mjs");
 const tests = run("test.mjs");
-const gates = ["check.mjs", "behaviour.mjs", "registration.mjs"].map((name) => ({ name, ...run(name) }));
+const gates = ["check.mjs", "behaviour.mjs", "registration.mjs", "layering.mjs", "host.mjs"].map((name) => ({ name, ...run(name) }));
 
 const lines = [];
 lines.push("# @nydsg/dsh-mindmap 测试运行记录");
@@ -47,8 +47,10 @@ lines.push("");
 lines.push("| 门禁 | 检查什么 | 结果 |");
 lines.push("|---|---|---|");
 lines.push("| `check.mjs` | bundle 可解析、`apply`/`inject` 面正确、CSS 令牌声明与消费一致、组件 CSS 零硬编码颜色 | " + (gates[0].status === 0 ? "PASS" : "FAIL") + " |");
-lines.push("| `behaviour.mjs` | 分词、关键词 TF-IDF、分支判定（含评分分离性）、布局几何、投影适配器容错 | " + (gates[1].status === 0 ? "PASS" : "FAIL") + " |");
-lines.push("| `registration.mjs` | `apply()`/`inject()` 契约、结构不变量（卡片只露提问、模块行归面板、布局不测 DOM） | " + (gates[2].status === 0 ? "PASS" : "FAIL") + " |");
+lines.push("| `behaviour.mjs` | 分词、关键词 TF-IDF、分支判定（含评分分离性）、**文档的层级上限与换行新建**、布局几何、投影适配器容错 | " + (gates[1].status === 0 ? "PASS" : "FAIL") + " |");
+lines.push("| `registration.mjs` | `apply()`/`inject()` 契约、**把视图真的渲染一遍**再断言结构不变量（卡片只露提问、模块行归面板、布局不测 DOM、崩溃面板不出现、三操作可见） | " + (gates[2].status === 0 ? "PASS" : "FAIL") + " |");
+lines.push("| `layering.mjs` | 提示词资产与变量替换、配置夹取（温度 0.2–0.5、层级 5）、片段协议（Markdown 与 JSON、失败即报告）、全局状态、落点判定、离线判定的三操作 | " + (gates[3].status === 0 ? "PASS" : "FAIL") + " |");
+lines.push("| `host.mjs` | 宿主模型桥：路由挂载与卸载、`/info`、`/layer`、拒绝（无 prompt / 非 JSON / 超大 body / 错误方法）、夹取、**页面断开即取消**、失败即失败（502） | " + (gates[4].status === 0 ? "PASS" : "FAIL") + " |");
 lines.push("");
 lines.push("```");
 lines.push(gates.map((gate) => gate.out.trim()).join("\n\n"));

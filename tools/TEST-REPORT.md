@@ -17,8 +17,10 @@ node tools/make-report.mjs  # 重新生成本文档
 | 门禁 | 检查什么 | 结果 |
 |---|---|---|
 | `check.mjs` | bundle 可解析、`apply`/`inject` 面正确、CSS 令牌声明与消费一致、组件 CSS 零硬编码颜色 | PASS |
-| `behaviour.mjs` | 分词、关键词 TF-IDF、分支判定（含评分分离性）、布局几何、投影适配器容错 | PASS |
-| `registration.mjs` | `apply()`/`inject()` 契约、结构不变量（卡片只露提问、模块行归面板、布局不测 DOM） | PASS |
+| `behaviour.mjs` | 分词、关键词 TF-IDF、分支判定（含评分分离性）、**文档的层级上限与换行新建**、布局几何、投影适配器容错 | PASS |
+| `registration.mjs` | `apply()`/`inject()` 契约、**把视图真的渲染一遍**再断言结构不变量（卡片只露提问、模块行归面板、布局不测 DOM、崩溃面板不出现、三操作可见） | PASS |
+| `layering.mjs` | 提示词资产与变量替换、配置夹取（温度 0.2–0.5、层级 5）、片段协议（Markdown 与 JSON、失败即报告）、全局状态、落点判定、离线判定的三操作 | PASS |
+| `host.mjs` | 宿主模型桥：路由挂载与卸载、`/info`、`/layer`、拒绝（无 prompt / 非 JSON / 超大 body / 错误方法）、夹取、**页面断开即取消**、失败即失败（502） | PASS |
 
 ```
 note: manifest: one loader row for @nydsg/dsh-mindmap
@@ -28,9 +30,20 @@ check: PASS (0 problems)
 
 behaviour: PASS (0 problems)
 
+[@nydsg/dsh-mindmap v1.4.1] {
+  turns: 1,
+  modules: 2,
+  roots: 1,
+  manual: 0,
+  firstQuestion: '帮我做一个思维导图插件，思维导图要能点击'
+}
 note: bundle: D:\Codex-workspace\dsh-mindmap\lib\client.js
-note: locale keys: 95 zh / 95 en; view-referenced: 80
+note: locale keys: 154 zh / 154 en; view-referenced: 136
 registration: PASS (0 problems)
+
+layering: PASS (0 problems)
+
+host: PASS (0 problems)
 ```
 
 ---
@@ -52,13 +65,13 @@ result: 5 turns → 1 branch root(s), 5 column(s), 5 connector(s), canvas 1612×
          dsh 插件安装失败怎么排查 profile 配置
          ├─ #3 [previous 0.00] col3
          │  思维导图的卡片配色能不能换成深色主题
-         │  └─ #4 [auto 0.44] col4
+         │  └─ #4 [previous 0.00] col4
          │     深色主题下卡片的对比度需要满足 4.5:1 吗
          └─ #5 [auto 0.56] col3
             dsh 插件安装完了还是要重启 profile 吗
 
    connectors (parent right edge → child left edge):
-     #3 → #4   (1276,50) → (1332,50)   [auto]
+     #3 → #4   (1276,50) → (1332,50)   [previous]
      #2 → #3   (952,95) → (1008,50)   [previous]
      #2 → #5   (952,95) → (1008,140)   [auto]
      #1 → #2   (628,95) → (684,95)   [auto]
@@ -78,11 +91,11 @@ result: 4 turns → 1 branch root(s), 5 column(s), 4 connector(s), canvas 1612×
          这个 dsh 插件要加一个思维导图视图
          └─ #3 [auto 0.57] col3
             思维导图视图里分支连线怎么画
-            └─ #4 [auto 0.44] col4
+            └─ #4 [previous 0.00] col4
                分支连线的曲线控制点怎么算
 
    connectors (parent right edge → child left edge):
-     #3 → #4   (1276,50) → (1332,50)   [auto]
+     #3 → #4   (1276,50) → (1332,50)   [previous]
      #2 → #3   (952,50) → (1008,50)   [auto]
      #1 → #2   (628,50) → (684,50)   [previous]
      #__title__ → #1   (280,50) → (360,50)   [root]
@@ -232,8 +245,14 @@ F. Segmentation / keyword engine (the inputs to matching)
 
   PASS  registration.mjs
         note: bundle: D:\Codex-workspace\dsh-mindmap\lib\client.js
-        note: locale keys: 95 zh / 95 en; view-referenced: 80
+        note: locale keys: 154 zh / 154 en; view-referenced: 136
         registration: PASS (0 problems)
+
+  PASS  layering.mjs
+        layering: PASS (0 problems)
+
+  PASS  host.mjs
+        host: PASS (0 problems)
 
 ══════════════════════════════════════════════════════════════════════════
 2. SHOWCASE — what the engine produces
@@ -249,12 +268,12 @@ F. Segmentation / keyword engine (the inputs to matching)
   │  │     dsh 插件安装失败怎么排查 profile 配置
   │  │  ├─ #3 [previous 0.00]   col 3  y   12  h 76
   │  │  │     思维导图的卡片配色能不能换成深色主题
-  │  │  │  ├─ #4 [auto 0.44]   col 4  y   12  h 76
+  │  │  │  ├─ #4 [previous 0.00]   col 4  y   12  h 76
   │  │  │  │     深色主题下卡片的对比度需要满足 4.5:1 吗
   │  │  ├─ #5 [auto 0.56]   col 3  y  102  h 76
   │  │  │     dsh 插件安装完了还是要重启 profile 吗
 
-   connector  3 →  4  (1276,50) → (1332,50)  [auto]
+   connector  3 →  4  (1276,50) → (1332,50)  [previous]
    connector  2 →  3  (952,95) → (1008,50)  [previous]
    connector  2 →  5  (952,95) → (1008,140)  [auto]
    connector  1 →  2  (628,95) → (684,95)  [auto]
@@ -300,14 +319,16 @@ F. Segmentation / keyword engine (the inputs to matching)
        expected registration.mjs to FAIL → it failed
          - inject() must declare sources under `hooks`; without it the renderer passes the face through verbatim and the view receives raw source objects instead of Hooks
          - the bound face must expose useChat as a callable Hook
-       other gates: check.mjs:pass  behaviour.mjs:pass
+       other gates: check.mjs:pass  behaviour.mjs:pass  layering.mjs:pass  host.mjs:pass
+       note: layering.mjs:fail also detected this change
 
   ✓  let a pinned branch root be re-linked by the matcher (the manual-vs-auto bug)
        expected behaviour.mjs to FAIL → it failed
          - a pinned root must be labelled manual, not mistaken for an unmatched turn
          - a pinned link must be labelled manual
          - a pinned root must stay labelled manual: got "root", expected "manual"
-       other gates: check.mjs:pass  registration.mjs:pass
+         - a hand pin must stay labelled manual even past the cap: got "root", expected "manual"
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:fail  host.mjs:pass
 
   ✓  assign rows by a pre-order walk instead of centering a parent on its children
        expected behaviour.mjs to FAIL → it failed
@@ -315,18 +336,19 @@ F. Segmentation / keyword engine (the inputs to matching)
          - parent turn:2 must sit between its children (top 140, parent 230, bottom 140)
          - parent turn:1 must sit between its children (top 230, parent 320, bottom 230)
          - parent __title__ must sit between its children (top 320, parent 410, bottom 320)
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
 
   ✓  allow a connector to be omitted (draw no line for a linked node)
        expected behaviour.mjs to FAIL → it failed
          - one connector per turn, none for the title: got 1, expected 4
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
 
   ✓  collapse the shared-signal ratio to a raw cosine (the matcher's original scoring)
        expected behaviour.mjs to FAIL → it failed
          - background-only overlap must fall under the threshold, got 0.511
          - similarity must be a fraction
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
+       note: layering.mjs:fail also detected this change
 
   ✓  stop chaining: send a question with no wording match to its own branch again (the bug that shipped in 1.2.0)
        expected behaviour.mjs to FAIL → it failed
@@ -334,7 +356,13 @@ F. Segmentation / keyword engine (the inputs to matching)
          - a structural continuation must be labelled as one, not as a wording match
          - only the first turn may be a root, got 2
          - a back-and-forth must produce exactly one root, got 4: got 4, expected 1
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:fail  host.mjs:pass
+
+  ✓  loosen the deliberately tightened shared-signal threshold back to the gap midpoint
+       expected behaviour.mjs to FAIL → it failed
+         - the shared-signal threshold is a deliberate tightening at 0.50 or above; got 0.4 — lowering it re-admits the coincidence band
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
+       note: layering.mjs:fail also detected this change
 
   ✓  chain a turn to itself instead of the previous turn (the first turn must stay a root)
        expected behaviour.mjs to FAIL → it failed
@@ -342,45 +370,95 @@ F. Segmentation / keyword engine (the inputs to matching)
          - a structural continuation must be labelled as one, not as a wording match
          - only the first turn may be a root, got 2
          - a back-and-forth must produce exactly one root, got 4: got 4, expected 1
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:fail  host.mjs:pass
 
   ✓  let the depth limit fold the title node itself (the whole map collapsed into one card)
        expected behaviour.mjs to FAIL → it failed
          - at limit 1 the title and the first level are drawn: got 3, expected 2
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
 
   ✓  rewrite the bundle with Windows line endings (a scripted edit that leaves the checkout disagreeing with the repo)
        expected check.mjs to FAIL → it failed
          - these files use CRLF line endings; every text file must be LF (rewrite them with LF, do not "fix" the gate): lib\client.js
          - could not locate the CSS template literal
-       other gates: behaviour.mjs:pass  registration.mjs:pass
+       other gates: behaviour.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
 
   ✓  skip the title's outgoing connectors (the branch roots end up floating)
        expected behaviour.mjs to FAIL → it failed
          - one connector per turn, none for the title: got 3, expected 4
          - every branch root must be connected to the title, not merely listed after it: got 0, expected 1
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
 
   ✓  substitute the anchor text with a generic caption instead of the first question
        expected behaviour.mjs to FAIL → it failed
          - the title must carry the first question
-       other gates: check.mjs:pass  registration.mjs:pass
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
 
   ✓  unquote the loader row's package scalars (the manifest that aborted installation)
        expected check.mjs to FAIL → it failed
          - cordis.patch.yml is not valid YAML: line 20: a plain scalar may not start with "@" — quote it
-       other gates: behaviour.mjs:pass  registration.mjs:pass
+       other gates: behaviour.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
 
   ✓  insert the loader row twice under the same id (duplicate loader entry id)
        expected check.mjs to FAIL → it failed
          - cordis.patch.yml inserts loader id "@nydsg/dsh-mindmap" more than once — duplicate loader entry ids abort startup
          - cordis.patch.yml must insert exactly one loader row for @nydsg/dsh-mindmap; saw ["@nydsg/dsh-mindmap","@nydsg/dsh-mindmap"]
-       other gates: behaviour.mjs:pass  registration.mjs:pass
+       other gates: behaviour.mjs:pass  registration.mjs:pass  layering.mjs:pass  host.mjs:pass
+       note: layering.mjs:fail also detected this change
+
+  ✓  drop the documented level cap (the map marches off to the right again)
+       expected behaviour.mjs to FAIL → it failed
+         - the default cap is 5 branch levels; turn:6 sits at 6
+         - the default cap is 5 branch levels; turn:7 sits at 7
+         - the default cap is 5 branch levels; turn:8 sits at 8
+         - the default cap is 5 branch levels; turn:9 sits at 9
+       other gates: check.mjs:pass  registration.mjs:pass  layering.mjs:fail  host.mjs:pass
+
+  ✓  render a fragment without its operation marker (the 操作标注 the document requires)
+       expected layering.mjs to FAIL → it failed
+       other gates: check.mjs:pass  behaviour.mjs:pass  registration.mjs:pass  host.mjs:pass
+
+  ✓  read every model fragment as 父类下推 (the operation marker stops meaning anything)
+       expected layering.mjs to FAIL → it failed
+         - 回溯 must map to the branch operation: got "push", expected "branch"
+         - the earliest marker wins — a quoted list is not the answer: got "push", expected "sibling"
+         - an English marker must be accepted: got "push", expected "sibling"
+         - the Chinese operation name must be accepted: got "push", expected "sibling"
+       other gates: check.mjs:pass  behaviour.mjs:pass  registration.mjs:pass  host.mjs:pass
+
+  ✓  ignore a seeded model judgment (the model path stops shaping the tree)
+       expected layering.mjs to FAIL → it failed
+         - a seeded judgment must decide the parent: got "turn:3", expected "turn:1"
+         - a seeded judgment must be labelled as a judgment, not as a wording match: got "previous", expected "model"
+         - a seeded judgment must keep its operation: got undefined, expected "branch"
+         - the state must attribute a seeded parent to the model: got "offline", expected "model"
+       other gates: check.mjs:pass  behaviour.mjs:pass  registration.mjs:pass  host.mjs:pass
+
+  ✓  let a seeded judgment name a later turn as its parent (the acyclicity guard)
+       expected layering.mjs to FAIL → it failed
+         - a seeded parent that is not strictly earlier must be refused: got null, expected "turn:1"
+         - a refused judgment must fall back to the structural rule: got "root", expected "previous"
+         - a seeded parent naming the turn itself must be refused: got null, expected "turn:2"
+       other gates: check.mjs:pass  behaviour.mjs:pass  registration.mjs:pass  host.mjs:pass
+
+  ✓  report a failed model call as an empty success (the reply that never happened)
+       expected host.mjs to FAIL → it failed
+         - a failed call must not answer 200, got 200
+         - a failed call must not report ok
+         - the provider's failure message must be relayed
+         - an aborted model call must not answer 200, got 200
+       other gates: check.mjs:pass  behaviour.mjs:pass  registration.mjs:pass  layering.mjs:pass
+
+  ✓  keep paying for a model call the page abandoned (no cancellation)
+       expected host.mjs to FAIL → it failed
+         - a closed connection must abort the model call
+         - an aborted call must answer 504, got 502
+       other gates: check.mjs:pass  behaviour.mjs:pass  registration.mjs:pass  layering.mjs:pass
 
 ══════════════════════════════════════════════════════════════════════════
 SUMMARY
 ══════════════════════════════════════════════════════════════════════════
-  16 passed, 0 failed
+  26 passed, 0 failed
 
 test: PASS (all gates green, all mutations caught)
 ```

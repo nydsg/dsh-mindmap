@@ -13,6 +13,8 @@ Select a card and the side panel lists that turn's modules (reply / tool calls /
 
 **Everything is computed locally: no network requests, no model calls, no build step.**
 
+> **Since 1.4.0 there is also an opt-in path: the MODEL JUDGE.** It hands the requirement document's system prompt (see [Smart layering](#smart-layering-push--sibling--branch)) plus the mind map's global state to **the model you already configured in DSH**, lets it decide whether a turn is a 下推 / 换行 / 回溯, and pins the result onto the same map. The host half exposes one **local HTTP bridge** (`/plugin-mindmap/*`) for that, and it is called only when you press "Run the model judge" — the default stays the offline wording judge, and nothing is sent unless you ask.
+
 ![the mind-map view](docs/screenshot.png)
 
 ## Install
@@ -46,9 +48,14 @@ list (once listed).
 | Module panel | Selecting a card lists that turn's module rows; clicking a row shows its reply text, keyword-weight bars, backward analysis, and suggested follow-ups |
 | Depth control | The toolbar limits how many **branch** levels are drawn (the title is not one of them). A folded subtree offers "N more continuations" and expands in place |
 | Keyword filter | Matching cards stay normal, non-matching cards **dim instead of disappearing** (removing them would make a parent vanish and the structure would lie) |
+| Operation badges | Every card names the document's **operation**: `[下推] chained` / `[换行] new side-by-side` / `[回溯] auto {score}`, and the toolbar tallies all three |
+| Level cap | The document's **5 branch levels** is a hard rule: a turn that would go deeper is placed **beside** its predecessor (换行新建), so long sessions grow sideways instead of rightwards. Set 0 for uncapped |
+| Layering panel | The side panel explains the three operations, exposes the variables (`{{MAX_DEPTH}}` and friends), the model route and temperature, and the progress/result of a model run |
+| Copyable prompt | The document's **system prompt** and **user-input template** ship verbatim and can be copied in one click (the system prompt carries the run's effective configuration), along with the mind-map state and a single turn's fragment |
+| Model judge (opt-in) | Judges turns one call at a time with your own model; judgments are stored per session, turning the switch off stops them shaping the tree, a hand pin always wins, and one button clears them |
 | Outline export | Copy the whole map as a Markdown outline |
 | Flat surface | 1px outlines, solid fills, square corners, no shadows, no gradients; connectors are 1px orthogonal elbows |
-| Offline | All analysis happens in the browser. No network, no model calls |
+| Offline | By default all analysis happens in the browser. No network, no model calls |
 
 ## How a branch is decided
 
@@ -56,7 +63,7 @@ Two rules, and the **order** is the whole design:
 
 1. **A wording match wins.** If this question shares enough **signal words** with an
    earlier turn's *question* (score = shared signal weight ÷ the smaller side's
-   signal weight, threshold `0.40`), it attaches under that turn. This is the only
+   signal weight, threshold `0.50`), it attaches under that turn. This is the only
    evidence that a turn is *rejoining a specific older thread*.
 2. **Otherwise it continues the previous turn.** In a conversation the next question
    follows the last answer. That is **structure**, not a guess, so it does not have
@@ -65,7 +72,10 @@ Two rules, and the **order** is the whole design:
 
 Three kinds of link are labelled separately in the UI, because they are three
 different claims: `自动匹配 {score}` (a wording match), `接上一轮` (a structural
-continuation), `手动指定` (you set it).
+continuation), `手动指定` (you set it). Since 1.4.0 those labels also carry the
+document's **operation name** (`[回溯]` / `[下推]` / `[换行]`), because "which node does
+this attach to" and "which operation is this" are two faces of one decision — see
+[Smart layering](#smart-layering-push--sibling--branch).
 
 ### Why "continue the previous turn" cannot be a similarity test (the trap this project fell into)
 
@@ -107,13 +117,22 @@ Every question has two kinds of words: **background words** shared by the whole
 session (product names, "how", file names) and **signal words** belonging to only a
 few questions (appearing ≤2 times in the session, or above that question's own median
 IDF). **Score = shared signal weight ÷ the smaller side's signal weight**, threshold
-`0.40`.
+`0.50`.
 
 Why not cosine: measured on real cases (see [`tools/TEST-REPORT.md`](tools/TEST-REPORT.md)),
 true links score 0.29–0.72 in cosine while **background-only** false matches score
 0.16–0.20 — **no cosine threshold separates them**. With the signal ratio, true links
-land at 0.44–1.00 and false matches at ≤0.28, a clean gap, and the threshold comes
-straight out of that table.
+land at 0.44–1.00 and false matches at ≤0.28, a clean gap. **0.40 was that gap's
+midpoint; since 1.4.1 it is deliberately raised to `0.50`** to make a 回溯 claim harder
+to earn: 0.50 sits far from the false ceiling (0.28) and *above the bottom of the true
+band*, so borderline pairs in 0.44–0.50 (measured example: `深色主题下卡片的对比度需要
+满足 4.5:1 吗` continuing `思维导图的卡片配色能不能换成深色主题` = **0.4391**) are no
+longer claimed as "returning to an older thread" and fall back to conversation order
+instead. The trade: **fewer 回溯 links, each better evidenced** — and since those two
+turns are adjacent, 下推 and 回溯 name the same parent anyway, so the drawing barely
+moves while the claim becomes honest. `behaviour.mjs` pins the value directly
+(`LINK_MIN_SCORE >= 0.5`) and `test.mjs` carries a mutation that lowers it back to 0.40
+to prove the gate turns red.
 
 The automatic result is a **guess**, so any turn can be changed by hand (attach it to
 any earlier turn, force it to a new branch, or hand it back to the rule); a changed
@@ -148,6 +167,113 @@ Connectors are **orthogonal elbows** rather than beziers: right out of the paren
 
 A card never contains the reply: `registration.mjs` pins that with a structural assertion — `renderTreeCard` must render `turn.promptText`, must not contain `turn.answerText`, and must not call `renderCard` (module rows belong to the side panel; an expanding card would move its own height and shove every connector below it).
 
+## Smart layering: push / sibling / branch
+
+The requirement document (`DSH-Mindmap 智能分层提示词`) asks for one judgment per
+turn — how does this content relate to the nodes already on the map — resolved into
+**three operations**, with each answer emitting **only the new or adjusted Markdown
+nested-list fragment, marked with its operation type**. The plugin now has **two
+judges** sharing that vocabulary: the offline wording judge is the default, the model
+judge is opt-in.
+
+| Document's operation | Structure | Offline wording judge (default) | Model judge (opt-in) |
+|---|---|---|---|
+| **下推 (push)** | Child of the previous node, one level deeper | The question names no earlier turn → chain to the previous turn | The model judges it a follow-up / explanation / refinement / continuation |
+| **换行 (sibling)** | Same level as the previous node, side by side | Going deeper would exceed `{{MAX_DEPTH}}` (5) → place it beside its predecessor | The model judges it a new question raised by the last reply, or **cannot decide** |
+| **回溯 (branch)** | Reopened from an older ancestor | The question shares signal words with an earlier turn (≥ `0.50`) → attach under that turn | The model judges it highly related to an older node rather than a continuation |
+
+### Why the level cap becomes 换行
+
+The document's 判断逻辑 bounds the hierarchy ("no more than 5 levels; if it gets too
+deep, consider merging or splitting nodes") and its 配置建议 names **最大层级 = 5**. In
+the offline judge that is a **hard rule**: a turn that would land on level 6 is
+placed **beside its predecessor** instead (`LINK_MAX_DEPTH`, default 5) — the
+document's 换行新建, and a **structural** rule, so it needs no similarity score to
+qualify. Long sessions therefore stop marching right at level 5 and grow sideways.
+Both exits exist: set **最大层级 to 0** in the panel to go back to "uncapped", and
+**a hand pin is never capped** — the cap is a default, a pin is an instruction.
+
+### Why the offline judge resolves "cannot decide" as 下推
+
+The document's decision table ends with "cannot decide → be conservative → 换行新建".
+**The offline judge deliberately does not do that.** This repository measured it (see
+the section above): real follow-ups are pronoun-like and scored `0.00–0.33` on every
+overlap measure, so "no wording evidence" is the **normal** state of a genuine
+continuation. Reading that as "place it side by side" would put every real follow-up
+next to its predecessor — exactly the mistake 1.2.0 shipped (9 of 9 real follow-ups
+misjudged). The two judges therefore split the work by the evidence each can carry:
+the offline judge continues the previous turn and says so in the panel, while the
+model judge follows the document **literally** — a model can make that call; a wording
+engine cannot.
+
+### State, fragments, and the prompt
+
+- **The global state is derived, never stored.** `layerState` renders the turns plus
+  their resolved links into the document's `{{MINDMAP_STATE}}`: every node with its
+  operation, level, and parent, plus the Markdown nested list. A stored state could
+  disagree with the drawn tree; a derived one cannot.
+- **No operation markers in the state, always one in a fragment.** The document's own
+  历史节点 example is a clean nested list; the markers belong to the fragment a model
+  returns.
+- **No synthetic title line in the state.** The drawn title repeats the first question
+  by design, but it is a rendering device, not a node; emitting it would show the model
+  the same question once as a parent and once as a child — the "obvious wrong nesting"
+  the document's 验收标准 forbids.
+- **Both fragment transports are read**: the Markdown form (a `[下推]` / `[换行]` /
+  `[回溯]` first line plus a nested list — English markers, code fences, and chatty
+  preambles included) and the JSON form from the document's maintenance section
+  (`operation` with `path` / `labels`). A reply that cannot be parsed is **reported**
+  (`ok: false`, a reason, and the raw text), never assumed to be 下推.
+- **The node name stays your question** (clipped to `{{NODE_MAX_CHARS}}`). A name the
+  model invents is recorded, used in the state and fragment, and shown in the panel —
+  but the card keeps your question, which is this plugin's standing promise.
+- **The document's prompt ships verbatim** and is copyable from the panel, with the
+  run's effective configuration appended, so what you copy is what was sent.
+
+### How a model run works
+
+One run = **one model call per turn, in order, each carrying the state up to the
+previous turn** (the document's 状态维护 rule). The run has a **turn limit** (last 24
+by default), can be **stopped** at any time (a late reply from a stopped run is
+dropped, never half-applied), shows progress, and stores its judgments **per session**.
+Switching the model judge off stops them shaping the tree while keeping them for an
+instant switch back, a **hand pin always beats a model judgment**, and one button
+clears them all.
+
+### The model bridge: why an HTTP route
+
+A client bundle cannot reach a model: it receives `require` only, gets no `llm`
+service, and has no channel to its own host half. The call therefore lives in the
+**host half** (`lib/index.js`), which does exactly one thing — forward one call to
+`ctx.llm.stream` and hand the model's raw text back to the page:
+
+| Route | Purpose |
+|---|---|
+| `GET /plugin-mindmap/info` | Reports whether the bridge **can** work (does this composition have `llm`), the provider routes, and the profile's configured default provider/model |
+| `POST /plugin-mindmap/layer` | Takes `{system, user, provider, model, temperature, maxTokens, timeoutMs}` and answers `{ok, text, provider, model, usage}` |
+
+Why not the official Remote channel: a client-side Remote needs a **generated Typert
+schema shipped with the package**, and this repository deliberately has **no build
+step**. Named routes on `ctx.webServer` need no codegen, no wire schema, and no client
+service injection, and the page already has `fetch`. The cost is that it is a local
+HTTP surface, so it is **narrow by construction**: two exact routes, JSON only, a
+256 KiB body cap, a 2000-token cap, a temperature cap, a timeout, and **cancellation
+when the page goes away** — and **a failed call must be answered as a failure** (`502`),
+never as an empty string that looks like "judged, nothing to say".
+
+### Configuration: the document's 配置建议, implemented
+
+| Document's advice | In the plugin |
+|---|---|
+| Model temperature 0.2 – 0.5 | Editable, and **clamped into the band** (`1.5 → 0.5`, `0 → 0.2`); non-numeric falls back to 0.3 |
+| Max levels 5 | `LINK_MAX_DEPTH = 5` drives 换行新建; set 0 for uncapped |
+| Max node characters 15 | `{{NODE_MAX_CHARS}}`, used for the state, fragments, and node labels (clipped with an ellipsis) |
+| Output format: Markdown nested list | The default; the JSON form (`operation` field kept) is parsed too |
+| Operation marker: required | `layerFragmentMarkdown` emits it on the first line; a reply without one is **reported, not guessed** |
+| State maintenance: per turn | The model run rebuilds the state before judging the next turn |
+| Unknown → 换行新建 | Literal on the model path; the offline path chains instead (reasons above, and stated in the panel) |
+| Language: Chinese | Chinese by default, English selectable (the node-naming language goes into the system prompt) |
+
 ## Local development install
 
 If you want to change the plugin rather than just use it, mount the repository directory into a profile:
@@ -177,10 +303,13 @@ node tools/test.mjs          # runs the gates, then replays each historical bug 
 node tools/showcase.mjs      # what the engine actually decides on given conversations + the tree geometry
 node tools/make-report.mjs   # regenerates tools/TEST-REPORT.md from the two above
 node tools/check.mjs         # syntax + plugin face + bundle manifest + CSS token integrity / no hardcoded colours
-node tools/behaviour.mjs     # segmentation, keywords, branch scoring, layout geometry, projection adapters
-node tools/registration.mjs  # apply()/inject() contract + structural invariants
+node tools/behaviour.mjs     # segmentation, keywords, branch scoring, the level cap, layout geometry, projection adapters
+node tools/registration.mjs  # apply()/inject() contract + structural invariants of a view that REALLY renders
+node tools/layering.mjs      # prompt assets, variable substitution, config clamping, the fragment protocol, the state, placement
+node tools/host.mjs          # the host bridge: mounting, /info, /layer, refusals, clamping, cancellation, failure-as-failure
 node tools/verify-pack.mjs   # pre-publish: manifest identity, required files, no developer-machine absolute paths
 node tools/screenshot.mjs    # regenerates docs/screenshot.png (needs Edge or Chrome)
+node tools/session-map.mjs   # draws a REAL session log with this plugin's own judgment (HTML + PNG + an operation report)
 node tools/measure-sessions.mjs     # measures the matching rule on this machine's real sessions (decompresses the multi-frame zstd logs under ~/.dsh/sessions)
 ```
 
@@ -196,12 +325,12 @@ script needs a Chromium-based browser). `npm test` is `node tools/test.mjs`; the
 > hand-written is the DOM skeleton around it (tab strip, toolbar, side panel) and
 > the DSH theme token values. After a visual change, run `npm run screenshot`.
 
-All three code gates (`check` / `behaviour` / `registration`) must report
-`PASS (0 problems)`, and `test.mjs` must additionally report `all mutations caught`.
-`verify-pack.mjs` is a fourth gate, but it only serves publishing and is run
+All five code gates (`check` / `behaviour` / `registration` / `layering` / `host`) must
+report `PASS (0 problems)`, and `test.mjs` must additionally report `all mutations
+caught`. `verify-pack.mjs` is a sixth gate, but it only serves publishing and is run
 before a release.
 
-**A gate that cannot go red is not a gate.** `test.mjs` reintroduces each historical bug into a throwaway copy and asserts the named gate turns red — including the `useChat` contract, a manual branch being overwritten by the matcher, pre-order row allocation, missing connectors, the score falling back to a raw cosine, the title being folded away by the depth limit, the title's connectors being skipped, the title text being replaced by a generic caption, and an unquoted `@` in the manifest. A green suite on its own proves nothing. The current run is recorded in [`tools/TEST-REPORT.md`](tools/TEST-REPORT.md).
+**A gate that cannot go red is not a gate.** `test.mjs` reintroduces each historical bug into a throwaway copy and asserts the named gate turns red — including the `useChat` contract, a manual branch being overwritten by the matcher, pre-order row allocation, missing connectors, the score falling back to a raw cosine, the title being folded away by the depth limit, the title's connectors being skipped, the title text being replaced by a generic caption, an unquoted `@` in the manifest, a dropped level cap, a fragment rendered without its operation marker, every fragment read as 下推, an ignored seeded judgment, a seeded judgment allowed to point forward, a failed model call answered as a success, and an abandoned call that is never cancelled. A green suite on its own proves nothing. The current run is recorded in [`tools/TEST-REPORT.md`](tools/TEST-REPORT.md).
 
 ### Traps (do not repeat these)
 
@@ -238,26 +367,42 @@ The rule comes from `bindInjectSources` in `dsh-client-ui-renderer`: **with** a 
 
 The more expensive lesson: the first `registration.mjs` used `inject()`'s return value as props directly, which **papered over the wrong contract on the plugin's behalf** and produced a false green. A gate has to reproduce the real framework's binding semantics, not bypass them.
 
+**A hand-rolled React in a gate is weaker than the real one, in places you will not notice.**
+
+The React stub in `registration.mjs` was unfaithful twice over: `createElement` recorded children in a **sibling** field named `children` (real React puts them in `props.children`) and **never invoked function components** (it only stored `type`). The consequence was that the view's error boundary — `MindMapBoundary`, which returns `props.children` — got `undefined`, returned `undefined`, and `MindMapBody` never ran at all, while the gate only asserted "something non-null was rendered". **A view that crashed on render would have stayed green.** Adding the 智能分层 panel exposed it: the assertion on the three operation names reported "the view rendered nothing".
+
+The stub now puts children in `props.children` (a single child as itself, exactly as React does) as well as in `children`, the gate expands function components, and it asserts that **no crash panel** (`mm-crash`) appears in the result — that panel is precisely the "page is up, view is broken" failure. Same lesson as above: **a stub must reproduce the real semantics, or it only tests itself.**
+
+**A mutation case can hang a gate instead of turning it red.**
+
+The new "a closed connection must abort the model call" case, when mutated into "never abort", left the fake model waiting for an abort that never came, so `test.mjs` **hung** rather than failing. A hung gate proves nothing. The fix is a hard deadline inside the fake model: without cancellation it fails after 1.5s, so the gate turns red in 1.7s and names the assertion. **A gate's failure must be fast and specific; a timeout is not a failure.**
+
 **`instanceof` fails across realms.** In branch resolution, `overrides instanceof Map` was always false inside the test sandbox (the gate's Map and the bundle's vm are different realms), so **every manual link was silently dropped** — automatic results looked fine while manual control did nothing at all. It is now duck-typed (anything with `get`/`has`/`forEach` counts as a Map). Avoid `instanceof` for any value crossing a realm boundary (vm, iframe, worker).
 
 **Do not rebuild React in test scaffolding.** To assert "a collapsed card shows no reply" I once wrote a walker over the element tree, and it kept failing on hook dispatchers, class component instantiation and `props.children` folding — emulation details **unrelated to the property under test** — each time showing up as a misleading red that cost far more than it returned. Structural assertions against the render function are exact, stable, and point at the real cause. When you genuinely need to assert on a rendered tree, use real React (e.g. `react-dom/server`) rather than hand-rolling it.
 
-**Do not write assertions about results instead of properties.** My first assertion for the matcher was "a pair sharing only background words must not link" — but that pair does not link under a **raw cosine** either (short sentences have low cosine by nature), so the assertion stayed green while the property that needed protecting — **separation** — was not protected at all: reverting the scoring to cosine kept every gate green. Rewriting it to assert a wide gap between the two score classes (background pair `< 0.4`, true link `> 0.4`, difference `> 0.3`) made the mutation fail immediately. Pin the **discriminating property**, not a result that merely happened to hold at the time.
+**Do not write assertions about results instead of properties.** My first assertion for the matcher was "a pair sharing only background words must not link" — but that pair does not link under a **raw cosine** either (short sentences have low cosine by nature), so the assertion stayed green while the property that needed protecting — **separation** — was not protected at all: reverting the scoring to cosine kept every gate green. Rewriting it to assert a wide gap between the two score classes (background pair below the threshold, true link above it, difference `> 0.3`) made the mutation fail immediately. Pin the **discriminating property**, not a result that merely happened to hold at the time. 1.4.1 added the second layer: those three assertions had `0.4` hardcoded, so moving the threshold would have left them describing a rule the code no longer implemented — they now compare against `LINK_MIN_SCORE` itself, and the *value* is pinned by its own assertion (`>= 0.5`), so quietly loosening it goes red.
 
 ## Known limits
 
 - **Chinese segmentation**: `Intl.Segmenter`'s `word` mode cuts most Chinese words down to single characters (`思维导图` → `思维|导|图`). The plugin does longest-run merging **inside the single-character runs the segmenter returns** (`导|图|插|件` → `导图插件`) but **does not cross** multi-character words the segmenter already produced (`思维`). So `思维导图` is reported as `思维` + `导图` rather than one word. That is deliberate: restoring it needs a dictionary, and forcing it with a sliding window invents words that do not exist (experiments produced `导图插件`). For the two uses here — keyword analysis and candidate questions — splitting into two words is usable.
 - **The match score is not a cosine**; it is the shared-signal ratio over the smaller side (rules and measurements above).
 - **Keyword threshold**: only words appearing ≥2 times in the session enter the keyword ranking; a word seen once appears only under "new topics".
-- **Candidate questions are template-assembled**, not semantically generated. Genuinely understanding what the previous turn was about would need an LLM; this version deliberately calls no model, to stay instant and offline.
-- **Paraphrases do not connect** ("how to install a plugin" vs "how is a plugin installed"): matching is **lexical**, and a paraphrase that shares no signal word lands on a different chain (`装` and `安装` segment to different tokens). Manual attachment exists for exactly this. The `0.40` threshold and the `12`-turn lookback are **derived from the case data** (the score table in `TEST-REPORT.md`), but they still only cover the conversation shapes I constructed.
+- **Candidate questions are template-assembled**, not semantically generated. Genuine semantic judgment now has an opt-in entry point (the model judge), but the **candidate-question** column is still template-assembled: the default path deliberately calls no model, to stay instant and offline.
+- **Paraphrases do not connect** ("how to install a plugin" vs "how is a plugin installed"): matching is **lexical**, and a paraphrase that shares no signal word lands on a different chain (`装` and `安装` segment to different tokens). Manual attachment exists for exactly this. The threshold (the gap's midpoint `0.40`, deliberately tightened to `0.50` in 1.4.1) and the `12`-turn lookback are **derived from the case data** (the score table in `TEST-REPORT.md`), but they still only cover the conversation shapes I constructed. A side effect of the tightening: **true links scoring 0.44–0.50 are no longer reported as 回溯** and fall back to conversation order (for adjacent turns the parent is usually the same, so the drawing barely moves while the claim gets harder).
 - **A question that changes the subject still chains to the previous turn**: that is the deliberate trade described above — "open in conversation order" beats "cluster by topic". Asking "what's for dinner" mid-thread makes it a child of the previous turn rather than a new tree; pinning that turn as a new branch corrects it.
-- **Long sessions get wide**: chaining means N turns span N columns. That is inherent to "opens rightwards, one level at a time" rather than a layout defect; the toolbar's **branch levels** folds deep subtrees and a card's "N more continuations" expands one level in place.
+- **Long sessions now grow sideways at level 5**: since 1.4.0 the document's **5 branch levels** is a hard rule, so a chain stops descending at level 5 and places the next turn **beside** its predecessor (换行新建). Columns are capped while rows keep growing; set the limit to 0 for the old "N turns = N columns" shape. The toolbar's **branch levels** still folds drawn subtrees.
+- **The model judge only touches the network when you press it**: the default offline judge sends no request. The model path needs a provider/model configured in the profile (otherwise the panel says so outright), and **the new host routes only appear after a Harness restart** — the client bundle composition and the loader row are built once at startup.
+- **The model bridge is a local HTTP surface**: two exact routes, JSON only, with body/token/temperature caps and a timeout, under the plugin's own `/plugin-mindmap` prefix. It performs no authentication (the same trust level as the other local services) and returns nothing but the model's raw text.
+- **A node name invented by the model does not replace your question on the card**: cards showing only your question is the standing promise; the model's name is used in the state, the fragment, and the side panel.
+- **A model may return something unparsable**: the panel then shows "fragment parse failed + reason + raw text", the turn keeps its previous judgment, and nothing is forced into the tree; rerun or pin by hand.
+- **The offline judge never looks further back than `LINK_MAX_AGE` (12 turns) for a 回溯, and never guesses semantics to produce a 换行** — those two are the model path's job.
+- **Ties go to the more recent turn**: the metric really can produce **exactly equal** scores. In one measured case `#5` matched `#1` and `#2` at precisely `0.5642`, because all three share the same words (`dsh`/plugin/install/profile) and their distinguishing words (`web`/restart vs failure/troubleshoot) do not match `#5`'s `要重` — the metric has **no information** to separate them, so the nearer turn wins. That is not a bug but the honest limit of a lexical measure, which is why any turn can be re-parented by hand.
 - **Very short follow-ups now always connect**: a question like "continue" or "yes" has one or two generic words and scores 0, so it chains to the previous turn by structure — which is exactly what the current rule guarantees. It can no longer be mistaken for a new branch (the old rule did that).
 - **Branches proceed linearly by turn**: a new turn can only attach under an **earlier** turn, so no back-reference (a later question becoming the parent of an earlier one) can appear.
 - **There is exactly one title, and it always uses the first question**: no second entry node and no "change the title" UI. If the first turn has no prompt text, the title shows "(no prompt text in this turn)".
 - **Only card height is measured**; columns and rows are all computed, so a measurement one frame late only shifts row spacing briefly and can never make connectors vanish. A font-loading height change after measurement may shift row spacing temporarily.
-- **Unverified**: this machine cannot take screenshots. **The flat look, the corner geometry of the elbows, and the spacing between the title card and the first column still need your eyes.** What has been machine-checked is syntax, token integrity, colour compliance, the arithmetic properties of matching and layout (including the title column and its connectors), and structural invariants. Mutation verification only proves the gates catch **those classes** of regression, not that they catch every regression.
+- **Unverified**: this machine cannot take screenshots. **The flat look, the corner geometry of the elbows, and the spacing between the title card and the first column still need your eyes.** A **real model call has not been run end to end** either: the host bridge is driven against a fake `llm` service in `tools/host.mjs` (mounting, routing, refusals, clamping, cancellation, and failure-as-failure all have assertions), but "the model really returned a parsable fragment" is yours to confirm after a Harness restart. What has been machine-checked is syntax, token integrity, colour compliance, the arithmetic properties of matching and layout (including the title column and its connectors), the layering protocol, the host-bridge contract, and structural invariants. Mutation verification only proves the gates catch **those classes** of regression, not that they catch every regression.
 
 ## License
 

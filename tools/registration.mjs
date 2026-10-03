@@ -126,13 +126,20 @@ const hookSlot = (index, init) => {
 };
 
 const React = {
-	createElement: (type, props, ...children) => ({
-		type,
-		props: props ?? {},
-		// React flattens and drops null/undefined children; the stub must not keep
-		// an empty array where React would pass undefined.
-		children: children.flat(Infinity).filter((child) => child !== null && child !== undefined)
-	}),
+	createElement: (type, props, ...children) => {
+		// React hands children through `props.children` — a single child as itself, two
+		// or more as an array — and this stub must model that exactly: the view's
+		// boundary returns `props.children`, so a stub that only recorded a sibling
+		// `children` field made the boundary return undefined and the whole view
+		// silently "render" nothing while the gate stayed green.
+		const flat = children.flat(Infinity).filter((child) => child !== null && child !== undefined);
+		return {
+			type,
+			props: { ...(props ?? {}), children: flat.length <= 1 ? flat[0] : flat },
+			// Kept as well: the structural assertions read the flat child list here.
+			children: flat
+		};
+	},
 	useMemo: (fn) => fn(),
 	useState: (init) => {
 		const slot = hookSlot(hookCursor++, init);
@@ -142,6 +149,10 @@ const React = {
 	},
 	useCallback: (fn) => fn,
 	useEffect: () => {},
+	// Real React runs layout effects after commit; the stub only has to exist, or
+	// the body would throw `useLayoutEffect is not a function` and the crash would
+	// be swallowed by the boundary it is testing.
+	useLayoutEffect: () => {},
 	useRef: (init) => {
 		const slot = hookSlot(hookCursor++, init);
 		slot.ref.current ??= init ?? null;
@@ -158,6 +169,88 @@ const React = {
 		}
 	}
 };
+
+/*
+ * Expand FUNCTION components the way React would.
+ *
+ * The stub's `createElement` records `type` without calling it, so a tree built by
+ * it still contains `MindMapBoundary` and `MindMapBody` as unopened nodes — which
+ * made an earlier revision of this gate assert on a view that had never rendered,
+ * and stay green through a body that crashed. Expanding function components (and
+ * only those: host elements stay plain records) makes the render assertions mean
+ * what they say.
+ *
+ * The hook ring is reset per component invocation, mirroring one React render.
+ *
+ * @param element - element, array, or leaf produced by the stub.
+ * @returns the expanded tree of host elements.
+ */
+function expand(element) {
+	if (element === null || element === undefined || typeof element !== "object") return element;
+	if (Array.isArray(element)) return element.map((child) => expand(child));
+	if (typeof element.type === "function") {
+		hookSlots = [];
+		hookCursor = 0;
+		try {
+			return expand(element.type(element.props ?? {}));
+		} catch (error) {
+			// Re-thrown so the caller can report WHICH component failed: the body's
+			// own boundary catches render throws, but a throw from the boundary
+			// itself would otherwise vanish.
+			error.message = `${element.type.name || "component"}: ${error.message}`;
+			throw error;
+		}
+	}
+	return { ...element, children: (element.children ?? []).map((child) => expand(child)) };
+}
+
+/**
+ * Every host element in an expanded tree, depth first.
+ * @param element - expanded tree.
+ * @returns a flat list.
+ */
+function flatten(element) {
+	const out = [];
+	const walk = (node) => {
+		if (node === null || node === undefined || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const child of node) walk(child);
+			return;
+		}
+		out.push(node);
+		for (const child of node.children ?? []) walk(child);
+	};
+	walk(element);
+	return out;
+}
+
+/**
+ * All text content of a tree, joined.
+ *
+ * Walks children itself rather than reusing {@link flatten}: text lives in
+ * `children` as strings, and a walker that only collects element objects would
+ * report an empty view as if it had rendered no copy at all.
+ *
+ * @param element - expanded tree.
+ * @returns the joined text.
+ */
+function textOf(element) {
+	const parts = [];
+	const walk = (node) => {
+		if (typeof node === "string") {
+			parts.push(node);
+			return;
+		}
+		if (node === null || node === undefined || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const child of node) walk(child);
+			return;
+		}
+		for (const child of node.children ?? []) walk(child);
+	};
+	walk(element);
+	return parts.join(" | ");
+}
 
 vm.runInContext(source, sandbox, { filename: "lib/client.js" });
 ok(loaded.length === 1, `expected one __ModuleLoader__.load call, saw ${loaded.length}`);
@@ -336,15 +429,41 @@ if (registrations.length === 1) {
 		}
 		ok(typeof bound.useChat === "function", "the bound face must expose useChat as a callable Hook");
 
-		// The view must render with the real snapshot and with an empty one.
+		// The view must render with the real snapshot and with an empty one, and the
+		// render must be a MAP: the boundary's crash panel is what a throw produces,
+		// so its presence is a failure even though the entry stays mounted.
 		for (const [label, snapshot] of [["populated", CHAT_SNAPSHOT], ["empty", null]]) {
 			const face = { ...bound, useChat: (selector) => selector(snapshot) };
+			let tree = null;
 			try {
-				const tree = component({ ...face, writeDraft: () => true, t: ctx.locale.bind("mindmap") });
+				tree = expand(component({ ...face, writeDraft: () => true, t: ctx.locale.bind("mindmap") }));
 				ok(tree !== null && tree !== undefined, `view rendered nothing for the ${label} snapshot`);
 			} catch (error) {
 				problems.push(`view threw for the ${label} snapshot: ${error.stack ?? error.message}`);
+				continue;
 			}
+			const elements = flatten(tree);
+			const crashes = elements.filter((element) => String(element.props?.className ?? "").includes("mm-crash"));
+			ok(
+				crashes.length === 0,
+				`the ${label} snapshot crashed inside the view boundary; the crash panel is not a rendered map: ${textOf(tree).slice(0, 300)}`
+			);
+			if (label !== "populated") continue;
+
+			/*
+			 * The layering surface must exist for a live session, and it must name the
+			 * document's three operations. This is the property that makes the feature
+			 * reachable at all: a panel that fails to render is invisible, and the
+			 * operations would then only exist in the code.
+			 */
+			const classes = elements.map((element) => String(element.props?.className ?? ""));
+			ok(classes.some((value) => value.includes("mm-layer")), "the layering panel must render in the side panel");
+			ok(classes.some((value) => value.includes("mm-chart__ops")), "the tree caption must show the operation tally");
+			const rendered = textOf(tree);
+			for (const operation of ["[下推]", "[换行]", "[回溯]"]) {
+				ok(rendered.includes(operation), `the rendered view must name the operation ${operation}`);
+			}
+			ok(rendered.includes("智能分层"), "the rendered view must expose the layering panel by name");
 		}
 
 		/*

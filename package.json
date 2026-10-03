@@ -1,7 +1,7 @@
 {
   "name": "@nydsg/dsh-mindmap",
-  "version": "1.3.0",
-  "description": "DSH conversation mind map: one horizontal hierarchy that starts at a single left-hand title node (the first question) and opens rightwards — every turn is a card showing only your question, continuing the turn before it, or rejoining an older question whose words it names again. Flat 1px outlines and square corners, no shadows, no gradients. Click a card for the reply, tool calls, keyword weights, and suggested follow-ups. 中文：把 DSH 对话轨迹渲染成一张从左到右的横向层级树，左侧唯一的起始总标题节点（= 第 1 轮提问）向右逐层展开：没有词面命中就接上一轮，命中更早的提问就回到那条分支；扁平化简约风格，可手动改父节点，本地分析、零网络。",
+  "version": "1.4.1",
+  "description": "DSH conversation mind map: one horizontal hierarchy that starts at a single left-hand title node (the first question) and opens rightwards — every turn is a card showing only your question, continuing the turn before it, or rejoining an older question whose words it names again (shared-signal threshold 0.50). Flat 1px outlines and square corners, no shadows, no gradients. Click a card for the reply, tool calls, keyword weights, and suggested follow-ups. 中文：把 DSH 对话轨迹渲染成一张从左到右的横向层级树，左侧唯一的起始总标题节点（= 第 1 轮提问）向右逐层展开：没有词面命中就接上一轮，命中更早的提问就回到那条分支（信号词阈值 0.50）；扁平化简约风格，可手动改父节点，本地分析、零网络。",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -56,6 +56,8 @@
     "test:check": "node tools/check.mjs",
     "test:behaviour": "node tools/behaviour.mjs",
     "test:registration": "node tools/registration.mjs",
+    "test:layering": "node tools/layering.mjs",
+    "test:host": "node tools/host.mjs",
     "showcase": "node tools/showcase.mjs",
     "report": "node tools/make-report.mjs",
     "screenshot": "node tools/screenshot.mjs",

@@ -272,7 +272,9 @@ eq(empty.total, 0, "an absent snapshot must report zero modules");
 	 * is low anyway. The property that actually separates a continuation from a
 	 * coincidence is that shared-signal ratio is HIGH for a genuine continuation and
 	 * LOW for a pair that merely reuses the session's vocabulary — so both sides are
-	 * asserted here, around the threshold.
+	 * asserted here, AROUND THE LIVE THRESHOLD (`LINK_MIN_SCORE`, not a literal that
+	 * would silently stop describing the rule), plus the deliberate tightening as its
+	 * own policy assertion below.
 	 */
 	{
 		const backgroundOnly = [
@@ -295,14 +297,33 @@ eq(empty.total, 0, "an absent snapshot must report zero modules");
 		const genuineScore = scoreOf(genuine);
 		const chainScore = scoreOf(later);
 
-		ok(genericScore < 0.4, `background-only overlap must fall under the threshold, got ${genericScore.toFixed(3)}`);
-		ok(genuineScore > 0.4, `a shared specific term must clear the threshold, got ${genuineScore.toFixed(3)}`);
-		ok(chainScore > 0.4, `a chained follow-up must clear the threshold, got ${chainScore.toFixed(3)}`);
+		ok(genericScore < api.LINK_MIN_SCORE, `background-only overlap must fall under the threshold, got ${genericScore.toFixed(3)}`);
+		ok(genuineScore > api.LINK_MIN_SCORE, `a shared specific term must clear the threshold, got ${genuineScore.toFixed(3)}`);
+		ok(chainScore > api.LINK_MIN_SCORE, `a chained follow-up must clear the threshold, got ${chainScore.toFixed(3)}`);
 		// The gap is the whole point: no threshold on the raw cosine separates these,
-		// which is why the score is a shared-signal ratio.
+		// which is why the score is a shared-signal ratio. Deliberately
+		// threshold-independent, so relaxing the number cannot relax the property.
 		ok(
 			genuineScore - genericScore > 0.3,
 			`the score must separate a continuation from a coincidence by a wide margin, got ${(genuineScore - genericScore).toFixed(3)}`
+		);
+		/*
+		 * The tightening itself is a decision, so it is pinned as one.
+		 *
+		 * 0.50 (not the measured gap's midpoint 0.40) was chosen deliberately to make a
+		 * 回溯 claim harder to earn: it clears the false class (≤0.28) and refuses the
+		 * bottom of the genuine band (0.44–0.50), which then falls back to conversation
+		 * order. Without this assertion the other three would follow the constant down
+		 * and a silent loosening would stay green — the same blindness the historical
+		 * "lower the wording threshold to zero" case had.
+		 */
+		ok(
+			api.LINK_MIN_SCORE >= 0.5,
+			`the shared-signal threshold is a deliberate tightening at 0.50 or above; got ${api.LINK_MIN_SCORE} — lowering it re-admits the coincidence band`
+		);
+		ok(
+			api.LINK_MIN_SCORE < genuineScore,
+			`the threshold must still sit under a genuine continuation (${genuineScore.toFixed(3)}), got ${api.LINK_MIN_SCORE}`
 		);
 		ok(
 			api.signalOverlap(api.questionProfiles([turn(1, "晚饭吃什么比较好"), turn(2, "明天天气怎么样")])[0], api.questionProfiles([turn(1, "晚饭吃什么比较好"), turn(2, "明天天气怎么样")])[1]) === 0,
@@ -431,6 +452,62 @@ eq(empty.total, 0, "an absent snapshot must report zero modules");
 	const sparse = api.resolveLinks([{ id: "turn:1", number: 1, promptText: "第一轮问题", text: "第一轮问题" }], new Map());
 	eq(sparse.nodes.get("turn:1").parent, null, "a turn with no modules and no reply must resolve without throwing");
 	eq(api.resolveLinks([], new Map()).roots.length, 0, "an empty session must resolve to an empty forest");
+}
+
+/*
+ * The documented level cap, and the third operation it produces.
+ *
+ * The requirement document bounds the hierarchy (最大层级 = 5) and asks for
+ * 换行新建 when going deeper would break it. That rule lives here because it is a
+ * property of the resolver: past the cap, a turn must stand BESIDE its
+ * predecessor rather than below it, must say so in its link kind, and must not
+ * drag the whole map deeper. The chain is deliberately longer than the cap and
+ * shares vocabulary, so the wording matcher is active throughout: the assertion
+ * is about the cap, not about which rule picked the parent.
+ */
+{
+	const chain = Array.from({ length: 9 }, (_, index) => ({
+		id: `turn:${index + 1}`,
+		number: index + 1,
+		promptText: `第 ${index + 1} 个追问`,
+		text: `第 ${index + 1} 个追问`
+	}));
+	const depthOf = (forest, id) => {
+		let depth = 0;
+		let walker = forest.nodes.get(id);
+		const seen = new Set();
+		while (walker !== undefined && walker.parent !== null && !seen.has(walker.turn.id)) {
+			seen.add(walker.turn.id);
+			depth += 1;
+			walker = forest.nodes.get(walker.parent);
+		}
+		return depth;
+	};
+	const capped = api.resolveLinks(chain, new Map());
+	for (const node of capped.nodes.values()) {
+		ok(depthOf(capped, node.turn.id) < 5, `the default cap is 5 branch levels; ${node.turn.id} sits at ${depthOf(capped, node.turn.id) + 1}`);
+	}
+	const sides = [...capped.nodes.values()].filter((node) => node.link.kind === "sibling");
+	ok(sides.length > 0, "a chain past the cap must place turns side by side (换行新建) instead of deeper");
+	ok(
+		sides.every((node) => capped.nodes.get(node.parent) !== undefined || node.parent === null),
+		"a side-by-side placement must still name a parent that exists (or none at all)"
+	);
+	// The turn that crossed the cap stands beside its predecessor, under the same
+	// parent — that is what "同级节点" means structurally.
+	eq(capped.nodes.get("turn:6").parent, "turn:4", "the sixth turn must stand beside the fifth, under the fifth's parent");
+	eq(capped.nodes.get("turn:6").link.kind, "sibling", "a capped placement must not be labelled as a continuation");
+	eq(capped.nodes.get("turn:6").link.operation, "sibling", "a capped placement must record the 换行 operation");
+
+	// The cap is a default, not a cage: 0 switches it off, and a hand pin outranks it.
+	const free = api.resolveLinks(chain, new Map(), { maxDepth: 0 });
+	ok(depthOf(free, "turn:9") === 8, `with the cap off the chain must nest nine deep, got ${depthOf(free, "turn:9") + 1}`);
+	const pinned = api.resolveLinks(chain, new Map([["turn:9", "turn:8"]]));
+	eq(pinned.nodes.get("turn:9").parent, "turn:8", "a hand-pinned parent must survive the depth cap");
+	eq(pinned.nodes.get("turn:9").link.kind, "manual", "a hand pin must stay labelled manual even past the cap");
+	// A short session is untouched: the cap must not invent side-by-side nodes.
+	const short = api.resolveLinks(chain.slice(0, 5), new Map());
+	eq([...short.nodes.values()].filter((node) => node.link.kind === "sibling").length, 0, "a chain inside the cap must produce no side-by-side placement");
 }
 // ── horizontal layout geometry ────────────────────────────────────────────
 //

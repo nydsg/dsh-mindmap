@@ -4,6 +4,131 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] — a 回溯 claim is harder to earn (threshold 0.40 → 0.50)
+
+### Changed
+
+- **`LINK_MIN_SCORE` rose from 0.40 to 0.50.** A turn is reported as 回溯分支
+  (rejoining an older question) only when the shared-**signal** ratio clears a stricter
+  bar. 0.40 was the midpoint of the measured gap; 0.50 sits well clear of the false class
+  and *above the bottom of the genuine band*, so borderline pairs that used to be claimed
+  as "I am returning to an earlier thread" fall back to the structural rule (按对话顺序下推)
+  instead. Measured example of a pair that changes sides: `深色主题下卡片的对比度需要满足
+  4.5:1 吗` continuing `思维导图的卡片配色能不能换成深色主题` scores **0.4391** — a real
+  refinement of the immediately preceding question, and one where 下推 and 回溯 happen to
+  name the same parent, so the tree barely moves while the *claim* gets more honest.
+- **The trade, stated plainly**: the measured genuine band is 0.44–1.00, so pairs scoring
+  0.44–0.50 are no longer linked as 回溯. Fewer, better-evidenced 回溯 links; more turns
+  placed by conversation order. The false class tops out at 0.28, so the new threshold
+  still keeps a wide margin from coincidence — and, unlike 0.30, it does not sit inside
+  the noise band.
+
+### Added
+
+- **`tools/session-map.mjs` — draw a REAL conversation with the plugin's own judgment.**
+  Every other tool here runs on fixtures; this one reads a session log under
+  `~/.dsh/sessions` (multi-frame zstd, decompressed frame by frame), reconstructs each
+  turn's question and reply, and runs the plugin's actual `resolveLinks` /
+  `layerState` / `layoutTree` / `placeTree` / `edgePath` over them. It prints the three
+  operations per turn with the score that decided them, prints the document's
+  `{{MINDMAP_STATE}}`, and writes a standalone HTML page plus a PNG drawn from the
+  plugin's own stylesheet and geometry. `node tools/session-map.mjs [sessionId|latest] [outDir] [--depth N]`.
+  Two things it pins down that a text heuristic gets wrong: a real human turn is the
+  record whose `data.source.kind === "user"`, while everything the harness splices in
+  declares itself (`runtime-context`, `plugin:hindsight`, `tool-jobs`) — the
+  `tool-jobs` notice in particular arrives where a question would and was being counted
+  as a turn.
+- **The threshold's VALUE is now pinned by `behaviour.mjs`** (`LINK_MIN_SCORE >= 0.5`),
+  as a decided policy rather than a number nobody watches, and `test.mjs` grew a mutation
+  case that lowers it back to 0.40 and proves the gate turns red. The three separation
+  assertions around it now compare against `LINK_MIN_SCORE` itself instead of a hardcoded
+  `0.4`, so they can no longer describe a rule the code stopped implementing.
+
+## [1.4.0] — 智能分层: the document's three operations, and a model judge
+
+Implements the requirement document *DSH-Mindmap 智能分层提示词*: the map is now
+built from the document's three operations — **父类下推 (push) / 换行新建
+(sibling) / 回溯分支 (branch)** — with the document's system prompt, user template,
+variable set, and configuration landed as plugin assets, and an OPTIONAL model
+judge behind a local host bridge. The offline lexical engine stays the default.
+
+### Added — the layering protocol (offline)
+
+- **The three operations are the map's vocabulary.** Every card's badge now names
+  the operation rather than only the mechanism: a wording match to an older
+  question is `[回溯]`, continuing the previous turn is `[下推]`, a turn placed
+  beside its predecessor is `[换行]`, and a model judgment reports the operation it
+  chose. `tools/layering.mjs` owns this surface.
+- **The documented level cap (最大层级 = 5) drives a real third outcome.**
+  `LINK_MAX_DEPTH` (from the document's 判断逻辑 / 配置建议) places a turn that
+  would land deeper than the cap BESIDE its predecessor instead of below it —
+  the document's 换行新建 — so a long conversation grows sideways at the cap
+  instead of marching off to the right. `0` disables the cap and a hand pin is
+  exempt from it (a pin is an instruction, the cap is a default).
+- **The global state is derived, then rendered.** `layerState` turns the turns plus
+  their resolved links into the document's `{{MINDMAP_STATE}}`: ordered nodes with
+  operation, depth, and parent, plus the Markdown nested list. It is never stored,
+  so it cannot disagree with the tree it describes. No synthetic title line is
+  emitted — the drawn title repeats the first question by design, and handing the
+  model the same question twice would be exactly the "obvious wrong nesting" the
+  document's 验收标准 forbids.
+- **The fragment protocol, both transports.** `parseLayerFragment` reads the
+  document's Markdown form (`[下推] / [换行] / [回溯]`, Chinese or English marker,
+  fenced or bare, chatty or clean) and its JSON alternative (`operation` with
+  `path`/`labels`/`label`). An unparsable reply is REPORTED (`ok: false` with a
+  reason and the raw text), never guessed at.
+- **`layerFragmentMarkdown`** renders the document's output format: the operation
+  marker on the first line, then the Markdown nested list, with node labels clipped
+  to `{{NODE_MAX_CHARS}}`.
+
+### Added — the prompt assets and configuration
+
+- **The document's system prompt and user-input template, verbatim**, as
+  `LAYER_SYSTEM_PROMPT` / `LAYER_USER_TEMPLATE`, with the documented variables
+  (`MAX_DEPTH`, `NODE_MAX_CHARS`, `LANGUAGE`, `OUTPUT_FORMAT`, `MINDMAP_STATE`,
+  `LAST_NODE`, `CURRENT_QUESTION`, `CURRENT_ANSWER`) substituted before a call. The
+  「智能分层」 panel shows and copies all of it, and the effective configuration is
+  appended to the system prompt so what was sent is auditable.
+- **Configuration with the document's numbers as defaults and its stability band
+  ENFORCED**: 层级上限 5 (0 = 不限), 节点字数 15, 输出语言 中文, 输出格式 Markdown 嵌套
+  列表, and 模型温度 clamped into 0.2–0.5. Every field degrades to its default on
+  bad input instead of poisoning the tree.
+
+### Added — the optional model judge
+
+- **A local host bridge (`lib/index.js`, two exact routes).** The client half cannot
+  reach a model (a browser bundle gets no `llm` service and no host-call channel),
+  so the host half owns one thing: `POST /plugin-mindmap/layer` streams a call
+  through `ctx.llm.stream` and answers with the model's raw text;
+  `GET /plugin-mindmap/info` reports whether a call is possible and which route it
+  would take (the profile's own default model selection). No generated Typert
+  schema and no build step, which is why this is a route and not a Remote.
+- **Bounded by construction**: two exact paths, JSON only, a 256 KiB body cap, a
+  2000-token cap, a temperature clamp, a timeout, and cancellation when the page
+  goes away — and a failed call is answered as a failure (`502`) rather than as an
+  empty success. `tools/host.mjs` drives all of it against a fake context.
+- **A run judges turns in order and keeps the state current** (the document's 状态维护
+  rule), bounded by a turn limit, cancellable, and visible as progress. Judgments are
+  stored per session; turning the model judge off keeps them but stops them shaping
+  the tree, and a hand pin always wins over a model judgment.
+- **The offline judge keeps its measured rule.** Where the document says "无法判断归属
+  → 换行新建", the offline engine still continues the previous turn — because this
+  repo measured that real follow-ups are pronoun-like and scored 0.00–0.33 on every
+  overlap measure (see 1.3.0 below). The document's rule is implemented literally on
+  the model path, where a model can actually judge it.
+
+### Fixed
+
+- **A second gate blind spot, found while adding this: `registration.mjs` never
+  rendered the view.** Its React stub recorded `type` without invoking function
+  components and never put children into `props.children`, so `MindMapBoundary`
+  returned `undefined` and every render assertion was vacuous — a body that crashed
+  would have stayed green. The stub now models both, the gate expands function
+  components, and it fails when the crash panel appears or when the layering surface
+  (panel, operation tally, the three operation names) is missing.
+- **A TDZ crash in the view**: the model-run callback listed `model.turns` in its
+  dependency array above `model`'s own declaration, which throws on the first render.
+
 ## [1.3.0] — a question follows the answer before it
 
 ### Changed — the matching rule
