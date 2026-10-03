@@ -2,6 +2,15 @@
 # network cannot reach registry.npmjs.org, but GitHub's can. `prepack` runs the
 # gates again here, so a red gate aborts the upload before anything leaves the
 # machine.
+#
+# Two ways in, and npm picks the order itself (OIDC first, token as fallback):
+#   - Trusted publishing: configure GitHub owner `nydsg`, repository
+#     `dsh-mindmap`, workflow `publish.yml` in the package's settings on
+#     npmjs.com. Nothing secret lives in the repo; npm mints a short-lived
+#     credential from the job's OIDC identity.
+#   - `NPM_TOKEN` repository secret: a granular access token with read+write on
+#     the `@nydsg` scope and "bypass 2FA" enabled. Needed if trusted publishing
+#     cannot be configured for the name before its first publish.
 name: publish
 
 on:
@@ -15,25 +24,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Lets the CLI exchange a GitHub OIDC token for a publish credential.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
+      # Node 22, not 24: the gates run here through `prepack`, so this job must
+      # use a runtime the CI matrix already covers.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           # Writes //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN} into the
-          # runner's .npmrc, so `npm publish` below is already authenticated.
+          # runner's .npmrc, so the token fallback below is already wired up.
           registry-url: https://registry.npmjs.org
 
-      # A missing secret otherwise surfaces as a confusing 401 from the registry.
-      - name: require NPM_TOKEN
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::Repository secret NPM_TOKEN is missing. Create a granular access token with read+write on @nydsg, enable 'bypass 2FA', and add it as the NPM_TOKEN secret."
-            exit 1
-          fi
+      # Node 22 ships npm 10.x, and trusted publishing needs 11.5.1 or later.
+      - name: npm 11 for trusted publishing
+        run: npm install --global npm@latest
 
       # --access public is required for a scope package, and the explicit
       # registry keeps a stray mirror setting from silently swallowing the upload.
