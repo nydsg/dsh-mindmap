@@ -1,0 +1,51 @@
+# Publishing is done from the runner, not from a laptop: the maintainer's
+# network cannot reach registry.npmjs.org, but GitHub's can. `prepack` runs the
+# gates again here, so a red gate aborts the upload before anything leaves the
+# machine.
+name: publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # Writes //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN} into the
+          # runner's .npmrc, so `npm publish` below is already authenticated.
+          registry-url: https://registry.npmjs.org
+
+      # A missing secret otherwise surfaces as a confusing 401 from the registry.
+      - name: require NPM_TOKEN
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::Repository secret NPM_TOKEN is missing. Create a granular access token with read+write on @nydsg, enable 'bypass 2FA', and add it as the NPM_TOKEN secret."
+            exit 1
+          fi
+
+      # --access public is required for a scope package, and the explicit
+      # registry keeps a stray mirror setting from silently swallowing the upload.
+      - name: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --registry=https://registry.npmjs.org/ --access public
+
+      - name: verify the version is live
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          npm view "$name@$version" version --registry=https://registry.npmjs.org/
