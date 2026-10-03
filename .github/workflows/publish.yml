@@ -12,6 +12,10 @@
 # `npm stage publish` leaves behind does not count. That one release has to be
 # approved with 2FA — stage it, then Approve on npmjs.com — after which this
 # step works untouched.
+#
+# No repository secret is involved. An unused NODE_AUTH_TOKEN would only invite
+# npm to fall back to a token, which cannot publish anyway, and the resulting
+# 2FA error hides the real OIDC failure.
 name: publish
 
 on:
@@ -35,9 +39,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          # Writes //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN} into the
-          # runner's .npmrc, so the token fallback below is already wired up.
-          registry-url: https://registry.npmjs.org
 
       # Node 22 ships npm 10.x, and trusted publishing needs 11.5.1 or later.
       # Staying on the 11.x line avoids npm 12, which wants a newer Node than
@@ -47,16 +48,10 @@ jobs:
 
       # --access public is required for a scope package, and the explicit
       # registry keeps a stray mirror setting from silently swallowing the upload.
-      # --access public is required for a scope package, and the explicit
-      # registry keeps a stray mirror setting from silently swallowing the upload.
       - name: publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --registry=https://registry.npmjs.org/ --access public
 
       - name: verify the version is live
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
