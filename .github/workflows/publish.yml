@@ -64,12 +64,14 @@ jobs:
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm%3Aregistry.npmjs.org" \
             | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).value||'')}catch(e){console.log('')}})")
           echo "id token length: ${#id_token}"
+          echo "--- claims npm will match against ---"
+          echo "$id_token" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const p=JSON.parse(Buffer.from(s.trim().split('.')[1],'base64').toString('utf8'));for(const k of ['repository','repository_visibility','job_workflow_ref','workflow_ref','ref','event_name','workflow'])console.log(k+' = '+p[k])})"
           echo "--- registry view ---"
           npm view @nydsg/dsh-mindmap dist-tags versions \
             --registry=https://registry.npmjs.org/ || echo "<npm view failed>"
           # npm itself builds the path with a raw slash (npa().escapedName), so
           # try that form first and keep the percent-encoded one for contrast.
-          for path in "@nydsg/dsh-mindmap" "@nydsg%2Fdsh-mindmap"; do
+          for path in "@nydsg%2fdsh-mindmap" "@nydsg%2Fdsh-mindmap"; do
             echo "--- OIDC exchange: package/$path ---"
             curl -sS -X POST \
               -H "Authorization: Bearer $id_token" \
