@@ -5,9 +5,13 @@
 #
 # Publishing runs through trusted publishing (OIDC): npm checks that the job
 # belongs to `nydsg/dsh-mindmap`'s publish.yml and mints a short-lived
-# credential, so no token and no interactive 2FA are involved. The name had to
-# be claimed with one staged publish first, because trusted publishing needs the
-# package to already exist.
+# credential, so no token and no interactive 2FA are involved.
+#
+# The very first version cannot use this. npm's OIDC exchange answers "package
+# not found" until a real version exists, and the `0.0.0-stage` placeholder that
+# `npm stage publish` leaves behind does not count. That one release has to be
+# approved with 2FA — stage it, then Approve on npmjs.com — after which this
+# step works untouched.
 name: publish
 
 on:
@@ -45,41 +49,6 @@ jobs:
       # registry keeps a stray mirror setting from silently swallowing the upload.
       # --access public is required for a scope package, and the explicit
       # registry keeps a stray mirror setting from silently swallowing the upload.
-      #
-      # The CLI treats a failed OIDC exchange as "not configured" and quietly
-      # falls back to the token, which then fails 2FA with a message about
-      # tokens. This step asks the same endpoint directly so the real reason —
-      # a mismatched owner, repository, workflow filename or allowed action —
-      # ends up in the log instead of being swallowed.
-      - name: trusted publishing diagnostics
-        run: |
-          echo "id-token request url:   ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}"
-          echo "id-token request token: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
-          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
-            echo "::error::GitHub did not expose an OIDC request URL; the job is missing 'id-token: write'."
-            exit 1
-          fi
-          id_token=$(curl -sS \
-            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm%3Aregistry.npmjs.org" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).value||'')}catch(e){console.log('')}})")
-          echo "id token length: ${#id_token}"
-          echo "--- claims npm will match against ---"
-          echo "$id_token" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const p=JSON.parse(Buffer.from(s.trim().split('.')[1],'base64').toString('utf8'));for(const k of ['repository','repository_visibility','job_workflow_ref','workflow_ref','ref','event_name','workflow'])console.log(k+' = '+p[k])})"
-          echo "--- registry view ---"
-          npm view @nydsg/dsh-mindmap dist-tags versions \
-            --registry=https://registry.npmjs.org/ || echo "<npm view failed>"
-          # npm itself builds the path with a raw slash (npa().escapedName), so
-          # try that form first and keep the percent-encoded one for contrast.
-          for path in "@nydsg%2fdsh-mindmap" "@nydsg%2Fdsh-mindmap"; do
-            echo "--- OIDC exchange: package/$path ---"
-            curl -sS -X POST \
-              -H "Authorization: Bearer $id_token" \
-              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$path" \
-              | head -c 600 || true
-            echo
-          done
-
       - name: publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
