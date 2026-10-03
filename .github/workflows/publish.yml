@@ -45,6 +45,32 @@ jobs:
       # registry keeps a stray mirror setting from silently swallowing the upload.
       # --access public is required for a scope package, and the explicit
       # registry keeps a stray mirror setting from silently swallowing the upload.
+      #
+      # The CLI treats a failed OIDC exchange as "not configured" and quietly
+      # falls back to the token, which then fails 2FA with a message about
+      # tokens. This step asks the same endpoint directly so the real reason —
+      # a mismatched owner, repository, workflow filename or allowed action —
+      # ends up in the log instead of being swallowed.
+      - name: trusted publishing diagnostics
+        run: |
+          echo "id-token request url:   ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}"
+          echo "id-token request token: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
+          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "::error::GitHub did not expose an OIDC request URL; the job is missing 'id-token: write'."
+            exit 1
+          fi
+          id_token=$(curl -sS \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm%3Aregistry.npmjs.org" \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).value||'')}catch(e){console.log('')}})")
+          echo "id token length: ${#id_token}"
+          echo "--- npm token exchange ---"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $id_token" \
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@nydsg%2Fdsh-mindmap" \
+            | head -c 800 || true
+          echo
+
       - name: publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
